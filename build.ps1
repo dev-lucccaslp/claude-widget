@@ -54,7 +54,7 @@ $opcoes = @(
     "/out:$dist\ClaudeWidget.exe", "/win32icon:$icone", "/win32manifest:$PSScriptRoot\src\app.manifest",
     "/r:$wpf\PresentationFramework.dll", "/r:$wpf\PresentationCore.dll", "/r:$wpf\WindowsBase.dll",
     "/r:$wpf\UIAutomationClient.dll", "/r:$wpf\UIAutomationTypes.dll",
-    "/r:$fw\System.Xaml.dll", "/r:$fw\System.Web.Extensions.dll", "/r:$fw\System.Windows.Forms.dll", "/r:$fw\System.Drawing.dll",
+    "/r:$fw\System.Xaml.dll", "/r:$fw\System.Web.Extensions.dll", "/r:$fw\System.Windows.Forms.dll", "/r:$fw\System.Drawing.dll", "/r:$fw\System.Management.dll",
     "$PSScriptRoot\src\ClaudeWidget.cs"
 )
 & "$fw\csc.exe" @opcoes

@@ -54,6 +54,14 @@ Ele põe o widget em `%LOCALAPPDATA%\ClaudeWidget`, cria os atalhos e já abre. 
 
 **Compilar você mesmo:** clone o repositório e rode `.\build.ps1`. Ele usa o compilador C# que já vem no Windows e gera `dist\ClaudeWidget.exe`.
 
+## Atualizar
+
+Baixe o `.exe` novo na [página de Releases](https://github.com/dev-lucccaslp/claude-widget/releases/latest) e abra. A partir da 1.2.1, ele fecha a versão antiga sozinho e assume o lugar. Se você usou o instalador, a cópia instalada também é atualizada. Aparece um aviso de "atualizado", e a versão fica no menu do ícone nos ícones ocultos.
+
+> Vindo da 1.2.0 ou de antes, faça uma vez à mão: botão direito no mascote nos ícones ocultos, **Sair**, e então abra o `.exe` novo.
+
+O que mudou em cada versão está em [NOVIDADES.md](NOVIDADES.md).
+
 ## Como usar
 
 | Ação | O que acontece |

@@ -40,8 +40,8 @@ using Shapes = System.Windows.Shapes;
 [assembly: AssemblyProduct("Claude Widget")]
 [assembly: AssemblyDescription("O mascote do Claude Code na barra de tarefas, com o uso do plano")]
 [assembly: AssemblyCopyright("MIT - github.com/dev-lucccaslp/claude-widget")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
 
 namespace ClaudeWidget
 {
@@ -686,6 +686,8 @@ namespace ClaudeWidget
 
             CriarBalao();
             CriarBandeja();
+            // Se o "Iniciar com o Windows" aponta para um .exe antigo, passa a abrir o atual
+            if (IniciaComWindows()) IniciarComWindows(true);
 
             animacao = NovoTimer(120, TicAnimacao);
             vigia = NovoTimer(300, Vigiar);
@@ -909,6 +911,8 @@ namespace ClaudeWidget
             bandeja = new Forms.NotifyIcon { Text = "Claude Widget" };
             AtualizarIconeBandeja();
             var menu = new Forms.ContextMenuStrip();
+            menu.Items.Add(new Forms.ToolStripMenuItem("Claude Widget " + VersaoCurta) { Enabled = false });
+            menu.Items.Add(new Forms.ToolStripSeparator());
             var itemMostrar = new Forms.ToolStripMenuItem("Esconder widget");
             itemMostrar.Click += delegate { Esconder(!escondido); };
             menu.Items.Add(itemMostrar);
@@ -975,17 +979,32 @@ namespace ClaudeWidget
             catch { return false; }
         }
 
+        // Com o instalador, abre a cópia instalada (que é atualizada sozinha); sem ele, este .exe
+        static string CaminhoParaAbrir()
+        {
+            return File.Exists(Programa.ExeInstalado) ? Programa.ExeInstalado : Assembly.GetExecutingAssembly().Location;
+        }
+
         static void IniciarComWindows(bool ligar)
         {
             try
             {
                 using (var k = Registry.CurrentUser.CreateSubKey(ChaveRun))
                 {
-                    if (ligar) k.SetValue("ClaudeWidget", "\"" + Assembly.GetExecutingAssembly().Location + "\"");
+                    if (ligar) k.SetValue("ClaudeWidget", "\"" + CaminhoParaAbrir() + "\"");
                     else k.DeleteValue("ClaudeWidget", false);
                 }
             }
             catch { }
+        }
+
+        static string VersaoCurta { get { var v = Programa.Versao; return v.Major + "." + v.Minor + "." + v.Build; } }
+
+        public void AvisarAtualizacao()
+        {
+            if (bandeja == null) return;
+            bandeja.ShowBalloonTip(6000, "Claude Widget " + VersaoCurta,
+                "Atualizado! Clique no mascote para ver as opções novas.", Forms.ToolTipIcon.Info);
         }
 
         static readonly string[][] OpcoesDoAnel = { new[] { "O maior dos dois", "maior" }, new[] { "Sessão (5h)", "sessao" }, new[] { "Semanal", "semanal" } };
@@ -1514,21 +1533,80 @@ namespace ClaudeWidget
         const string EventoMostrar = @"Local\ClaudeWidget.Mostrar";
         const string EventoSair = @"Local\ClaudeWidget.Sair";
 
+        public static Version Versao { get { return Assembly.GetExecutingAssembly().GetName().Version; } }
+        static string EsteExe { get { return Assembly.GetExecutingAssembly().Location; } }
+        public static string ExeInstalado { get { return System.IO.Path.Combine(Config.Pasta, "ClaudeWidget.exe"); } }
+        // A cópia aberta deixa aqui a versão dela, para uma versão mais nova saber que pode assumir o lugar
+        static string ArquivoAberto { get { return System.IO.Path.Combine(Config.Pasta, "aberto.txt"); } }
+
+        static void Sinalizar(string evento)
+        {
+            try { using (var ev = EventWaitHandle.OpenExisting(evento)) ev.Set(); }
+            catch { }
+        }
+
+        // A cópia aberta é mais velha que esta? A 1.2.0 e as anteriores não deixam aberto.txt, então contam como mais velhas.
+        static bool AbertaEhMaisVelha()
+        {
+            try { return new Version(File.ReadAllText(ArquivoAberto).Split('|')[0].Trim()) < Versao; }
+            catch { return true; }
+        }
+
+        // A primeira versão (PowerShell) não escuta o pedido para sair e usa o mesmo nome de trava
+        static void FecharVersaoPowerShell()
+        {
+            try
+            {
+                using (var busca = new System.Management.ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'powershell.exe'"))
+                    foreach (System.Management.ManagementObject p in busca.Get())
+                    {
+                        var linha = p["CommandLine"] as string;
+                        if (linha == null || !(linha.Contains("claude-widget.ps1") || linha.Contains("claude-barra.ps1"))) continue;
+                        try { Process.GetProcessById(Convert.ToInt32(p["ProcessId"])).Kill(); } catch { }
+                    }
+            }
+            catch { }
+        }
+
+        // Quem usou o instalador abre pelos atalhos, que apontam para a cópia instalada: se ela for mais velha, troca
+        static void AtualizarCopiaInstalada()
+        {
+            try
+            {
+                var instalado = ExeInstalado;
+                if (!File.Exists(instalado) || string.Equals(System.IO.Path.GetFullPath(instalado), System.IO.Path.GetFullPath(EsteExe), StringComparison.OrdinalIgnoreCase)) return;
+                if (new Version(FileVersionInfo.GetVersionInfo(instalado).FileVersion) < Versao) File.Copy(EsteExe, instalado, true);
+            }
+            catch { }
+        }
+
         [STAThread]
         static void Main(string[] args)
         {
             bool sair = args.Contains("--sair"), demo = args.Contains("--demo");
-            bool criou;
+            bool criou, atualizou = false;
             using (var mutex = new Mutex(true, NomeMutex, out criou))
             {
                 if (!criou)
                 {
-                    // Já tem um aberto: pede para ele aparecer de novo (ou fechar, com --sair)
-                    try { using (var ev = EventWaitHandle.OpenExisting(sair ? EventoSair : EventoMostrar)) ev.Set(); }
-                    catch { }
-                    return;
+                    if (sair) { Sinalizar(EventoSair); return; }
+                    if (!AbertaEhMaisVelha()) { Sinalizar(EventoMostrar); return; }  // mesma versão: só aparece de novo
+                    // Esta versão é mais nova: pede para a aberta sair e assume o lugar dela
+                    Sinalizar(EventoSair);
+                    FecharVersaoPowerShell();
+                    try { criou = mutex.WaitOne(10000); }
+                    catch (AbandonedMutexException) { criou = true; }
+                    if (!criou) { Sinalizar(EventoMostrar); return; }
+                    atualizou = true;
                 }
                 if (sair) return;
+                AtualizarCopiaInstalada();
+                try
+                {
+                    Directory.CreateDirectory(Config.Pasta);
+                    File.WriteAllText(ArquivoAberto, Versao + "|" + EsteExe);
+                }
+                catch { }
 
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
                 Forms.Application.EnableVisualStyles();
@@ -1548,6 +1626,7 @@ namespace ClaudeWidget
                     e.Handled = true;
                 };
                 var controle = new Controle(app, demo);
+                if (atualizou) controle.AvisarAtualizacao();
 
                 var mostrar = new EventWaitHandle(false, EventResetMode.AutoReset, EventoMostrar);
                 var fechar = new EventWaitHandle(false, EventResetMode.AutoReset, EventoSair);
@@ -1564,6 +1643,7 @@ namespace ClaudeWidget
                 escuta.Start();
 
                 app.Run();
+                try { File.Delete(ArquivoAberto); } catch { }
                 mutex.ReleaseMutex();
             }
         }
