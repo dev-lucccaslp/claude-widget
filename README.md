@@ -9,7 +9,7 @@ O mascote do **Claude Code** morando na sua barra de tarefas do Windows, com um 
 ## O que ele faz
 
 - **Mostra o uso do plano** num anel ao lado do mascote. Você escolhe o que o anel mostra: o maior dos dois limites, só a sessão de 5 horas ou só o semanal. O anel fica laranja, amarelo a partir de 75% e vermelho a partir de 90%.
-- **Passando o mouse**, um segundo mascote chega andando e traz um balão com a sessão e a semana, cada uma com a hora em que renova.
+- **Passando o mouse**, um segundo mascote chega e traz um balão com a sessão e a semana, cada uma com a hora em que renova. Você escolhe como ele chega: a pé, de skate, de bicicleta, de carro ou de foguete.
 - **Se mexe o tempo todo:** anda, respira, olha em volta, pula, dança e pisca. Dá para desligar.
 - **Clique no anel** para atualizar na hora. Sozinho, ele atualiza a cada 5 minutos.
 - **Clique no mascote** (ou botão direito) para personalizar: o que mostrar, cor, chapéu, óculos escuros, posição, movimento e o visitante.
@@ -60,7 +60,7 @@ Ele põe o widget em `%LOCALAPPDATA%\ClaudeWidget`, cria os atalhos e já abre. 
 | --- | --- |
 | Passar o mouse | O visitante chega com o balão de uso |
 | Clicar no anel | Atualiza o número na hora |
-| Clicar no mascote ou botão direito | Abre o menu: mostrar %, cor, chapéu, óculos, posição, movimento, visitante, esconder, sair |
+| Clicar no mascote ou botão direito | Abre o menu: mostrar %, cor, chapéu, óculos, posição, movimento, visitante (e como ele chega), esconder, sair |
 | Segurar e arrastar | Muda o widget de lugar na barra |
 | Ícone nos ícones ocultos | Clique para esconder ou mostrar; botão direito para atualizar, mostrar %, iniciar com o Windows e sair |
 | Abrir o .exe de novo | Se ele estiver escondido, aparece de novo |

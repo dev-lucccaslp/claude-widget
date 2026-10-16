@@ -40,8 +40,8 @@ using Shapes = System.Windows.Shapes;
 [assembly: AssemblyProduct("Claude Widget")]
 [assembly: AssemblyDescription("O mascote do Claude Code na barra de tarefas, com o uso do plano")]
 [assembly: AssemblyCopyright("MIT - github.com/dev-lucccaslp/claude-widget")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace ClaudeWidget
 {
@@ -116,11 +116,12 @@ namespace ClaudeWidget
         public bool Movimento { get; set; }
         public bool Visitante { get; set; }
         public string Mostrar { get; set; }  // maior, sessao ou semanal
+        public string Transporte { get; set; }  // como o visitante chega: pe, skate, bike, carro ou foguete
         public Dictionary<string, Posicao> Posicoes { get; set; }
 
         public Config()
         {
-            Cor = Arte.Laranja; Chapeu = "nenhum"; Movimento = true; Visitante = true; Mostrar = "maior";
+            Cor = Arte.Laranja; Chapeu = "nenhum"; Movimento = true; Visitante = true; Mostrar = "maior"; Transporte = "pe";
             Posicoes = new Dictionary<string, Posicao>();
         }
 
@@ -136,6 +137,7 @@ namespace ClaudeWidget
                 if (string.IsNullOrEmpty(c.Cor)) c.Cor = Arte.Laranja;
                 if (string.IsNullOrEmpty(c.Chapeu)) c.Chapeu = "nenhum";
                 if (c.Mostrar != "sessao" && c.Mostrar != "semanal") c.Mostrar = "maior";
+                c.Transporte = Arte.AcharTransporte(c.Transporte).Id;
                 return c;
             }
             catch { return new Config(); }
@@ -265,6 +267,24 @@ namespace ClaudeWidget
         public string[][] Partes;  // cor + desenho, em pixel art acima da cabeça (y negativo)
     }
 
+    // Uma peça do transporte. Camada: atras ou frente do boneco. Quadro: "" sempre; "A"/"B" se revezam andando
+    // (rodas girando) e ficam no "A" parado; "MA"/"MB" só aparecem andando (fumaça, chama, risquinhos).
+    class Peca
+    {
+        public string Cor, Desenho, Camada = "frente", Quadro = "";
+        public double Traco;  // > 0: desenha só o contorno, com essa espessura
+    }
+
+    // Como o visitante chega. Coordenadas no mesmo sistema do boneco (corpo de 0,0 a 32,20).
+    class Transporte
+    {
+        public string Id, Nome;
+        public double Velocidade, Parada, AssentoY;
+        public string Pernas = "andar";  // andar, pedalar, paradas ou encolhidas
+        public bool Balanca;             // sobe e desce enquanto anda
+        public Peca[] Pecas = new Peca[0];
+    }
+
     static class Arte
     {
         public const string Laranja = "#D77757";
@@ -310,6 +330,52 @@ namespace ClaudeWidget
             new Chapeu { Id = "natal", Nome = "Natal", Partes = new[] {
                 new[] { "#DC2626", "M6,-6 H24 V-2 H6 Z M12,-8 H26 V-6 H12 Z" }, new[] { "#F5F5F5", "M4,-2 H28 V0 H4 Z M26,-10 H30 V-6 H26 Z" } } },
         };
+
+        static Peca P(string cor, string desenho, string camada = "frente", string quadro = "", double traco = 0)
+        {
+            return new Peca { Cor = cor, Desenho = desenho, Camada = camada, Quadro = quadro, Traco = traco };
+        }
+
+        public static readonly Transporte[] Transportes =
+        {
+            new Transporte { Id = "pe", Nome = "A pé", Velocidade = 6, Parada = 8, Balanca = true },
+            new Transporte { Id = "skate", Nome = "Skate", Velocidade = 8, Parada = 10, Pernas = "paradas", Pecas = new[] {
+                P("#F59E0B", "M-2,20 H34 V22 H-2 Z M-4,18 H-2 V20 H-4 Z M34,18 H36 V20 H34 Z", "atras"),
+                P("#9CA3AF", "M4,22 h4 v1 h-4 Z M24,22 h4 v1 h-4 Z", "atras"),
+                P("#F3F4F6", "M3,23 h3 v3 h-3 Z M26,23 h3 v3 h-3 Z", "atras"),
+                P("#9CA3AF", "M38,6 h6 v1 h-6 Z M40,12 h6 v1 h-6 Z", "atras", "MA"),
+                P("#9CA3AF", "M37,9 h6 v1 h-6 Z M39,15 h5 v1 h-5 Z", "atras", "MB") } },
+            new Transporte { Id = "bike", Nome = "Bicicleta", Velocidade = 7, Parada = 12, AssentoY = -4, Pernas = "pedalar", Pecas = new[] {
+                P("#E5E7EB", "M-3,22 A5,5 0 1 0 7,22 A5,5 0 1 0 -3,22 M25,22 A5,5 0 1 0 35,22 A5,5 0 1 0 25,22", "atras", "", 2),
+                P("#38BDF8", "M30,22 L18,15 L5,15 L2,22 M18,15 L14,22 L30,22 M5,15 L4,10 L0,10", "atras", "", 2),
+                P("#9CA3AF", "M2,18 V26 M-2,22 H6 M30,18 V26 M26,22 H34", "atras", "A", 1),
+                P("#9CA3AF", "M-1,19 L5,25 M5,19 L-1,25 M27,19 L33,25 M33,19 L27,25", "atras", "B", 1) } },
+            new Transporte { Id = "carro", Nome = "Carro", Velocidade = 10, Parada = 12, Pernas = "paradas", Balanca = true, Pecas = new[] {
+                P("#93C5FD", "M-3,4 H-1 V12 H-3 Z", "atras"),
+                P("#E5484D", "M-8,12 H40 V21 H-8 Z M-10,15 H-8 V21 H-10 Z M40,14 H42 V21 H40 Z"),
+                P("#B91C1C", "M14,13 h1 v7 h-1 Z"),
+                P("#FDE68A", "M-10,15 h3 v2 h-3 Z"),
+                P("#7F1D1D", "M40,15 h2 v2 h-2 Z"),
+                P("#1F1F1F", "M-5,19 h8 v7 h-8 Z M25,19 h8 v7 h-8 Z"),
+                P("#9CA3AF", "M-2,21 h2 v3 h-2 Z M28,21 h2 v3 h-2 Z", "frente", "A"),
+                P("#9CA3AF", "M-3,22 h4 v1 h-4 Z M27,22 h4 v1 h-4 Z", "frente", "B"),
+                P("#9CA3AF", "M44,18 h3 v3 h-3 Z", "frente", "MA"),
+                P("#9CA3AF", "M46,15 h2 v2 h-2 Z M43,19 h2 v2 h-2 Z", "frente", "MB") } },
+            new Transporte { Id = "foguete", Nome = "Foguete", Velocidade = 12, Parada = 14, AssentoY = -6, Pernas = "encolhidas", Balanca = true, Pecas = new[] {
+                P("#E5E7EB", "M0,12 H32 V21 H0 Z"),
+                P("#E5484D", "M-4,13 H0 V20 H-4 Z M-7,15 H-4 V18 H-7 Z M28,8 H34 V12 H28 Z M28,21 H34 V25 H28 Z"),
+                P("#60A5FA", "M8,14 h4 v4 h-4 Z"),
+                P("#9CA3AF", "M18,12 h1 v9 h-1 Z"),
+                P("#F97316", "M32,13 H40 V20 H32 Z", "frente", "MA"),
+                P("#FACC15", "M40,14 H45 V19 H40 Z", "frente", "MA"),
+                P("#F97316", "M32,14 H38 V19 H32 Z", "frente", "MB"),
+                P("#FACC15", "M38,15 H42 V18 H38 Z", "frente", "MB") } },
+        };
+
+        public static Transporte AcharTransporte(string id)
+        {
+            return Transportes.FirstOrDefault(t => t.Id == id) ?? Transportes[0];
+        }
 
         public static readonly Dictionary<string, Geometry> Pernas = new Dictionary<string, Geometry>
         {
@@ -360,15 +426,24 @@ namespace ClaudeWidget
         // Mascote: o mesmo desenho em blocos da tela de boas-vindas do Claude Code (pixel 2x4)
         public static string XamlBoneco(string p)
         {
+            // Atras e Frente guardam o transporte do visitante (o skate fica atrás, o carro na frente das pernas);
+            // Espelho vira o boneco para ele ir embora de frente; Assento levanta ele na bicicleta e no foguete
             return (@"
 <Canvas x:Name='§' Width='32' Height='20'>
-  <Canvas.RenderTransform><TranslateTransform/></Canvas.RenderTransform>
-  <Path x:Name='§Corpo' Data='M4,0 H28 V8 H32 V12 H28 V16 H4 V12 H0 V8 H4 Z'/>
-  <Path x:Name='§Pernas' Data='M6,16 h2 v4 h-2 Z M10,16 h2 v4 h-2 Z M20,16 h2 v4 h-2 Z M24,16 h2 v4 h-2 Z'/>
-  <Rectangle x:Name='§OlhoE' Canvas.Left='8' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
-  <Rectangle x:Name='§OlhoD' Canvas.Left='22' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
-  <Path x:Name='§Oculos' Fill='#0F0F0F' Visibility='Collapsed' Data='M6,3 h6 v5 h-6 Z M20,3 h6 v5 h-6 Z M12,4 h8 v2 h-8 Z'/>
-  <Canvas x:Name='§Chapeu'/>
+  <Canvas.RenderTransform>
+    <TransformGroup><ScaleTransform CenterX='16'/><TranslateTransform/></TransformGroup>
+  </Canvas.RenderTransform>
+  <Canvas x:Name='§Atras'/>
+  <Canvas x:Name='§Corpinho'>
+    <Canvas.RenderTransform><TranslateTransform/></Canvas.RenderTransform>
+    <Path x:Name='§Corpo' Data='M4,0 H28 V8 H32 V12 H28 V16 H4 V12 H0 V8 H4 Z'/>
+    <Path x:Name='§Pernas' Data='M6,16 h2 v4 h-2 Z M10,16 h2 v4 h-2 Z M20,16 h2 v4 h-2 Z M24,16 h2 v4 h-2 Z'/>
+    <Rectangle x:Name='§OlhoE' Canvas.Left='8' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
+    <Rectangle x:Name='§OlhoD' Canvas.Left='22' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
+    <Path x:Name='§Oculos' Fill='#0F0F0F' Visibility='Collapsed' Data='M6,3 h6 v5 h-6 Z M20,3 h6 v5 h-6 Z M12,4 h8 v2 h-8 Z'/>
+    <Canvas x:Name='§Chapeu'/>
+  </Canvas>
+  <Canvas x:Name='§Frente'/>
 </Canvas>").Replace("§", p);
         }
 
@@ -396,7 +471,7 @@ namespace ClaudeWidget
         </Grid>
       </StackPanel>
     </Border>
-    <Canvas Width='56' Height='40' ClipToBounds='True' IsHitTestVisible='False' SnapsToDevicePixels='True'>§V§</Canvas>
+    <Canvas Width='56' Height='46' Margin='0,-6,0,0' ClipToBounds='True' IsHitTestVisible='False' SnapsToDevicePixels='True'>§V§</Canvas>
   </StackPanel>
 </Window>";
 
@@ -441,16 +516,23 @@ namespace ClaudeWidget
     // Um mascote (o principal ou o visitante): aplica quadros de animação e o estilo escolhido
     class Boneco
     {
-        public Canvas Raiz, Chapeu;
-        public TranslateTransform Pulo;
+        public Canvas Raiz, Chapeu, Atras, Frente;
+        public TranslateTransform Pulo, Assento;
+        public ScaleTransform Espelho;
         public Shapes.Path Corpo, Pernas, Oculos;
         public Shapes.Rectangle OlhoE, OlhoD;
-        string ultimo = "";
+        string ultimo = "", transporte = "";
+        readonly List<KeyValuePair<Shapes.Path, string>> pecas = new List<KeyValuePair<Shapes.Path, string>>();
 
         public Boneco(FrameworkElement escopo, string p)
         {
             Raiz = (Canvas)escopo.FindName(p);
-            Pulo = (TranslateTransform)Raiz.RenderTransform;
+            var transformacoes = (TransformGroup)Raiz.RenderTransform;
+            Espelho = (ScaleTransform)transformacoes.Children[0];
+            Pulo = (TranslateTransform)transformacoes.Children[1];
+            Atras = (Canvas)escopo.FindName(p + "Atras");
+            Frente = (Canvas)escopo.FindName(p + "Frente");
+            Assento = (TranslateTransform)((Canvas)escopo.FindName(p + "Corpinho")).RenderTransform;
             Corpo = (Shapes.Path)escopo.FindName(p + "Corpo");
             Pernas = (Shapes.Path)escopo.FindName(p + "Pernas");
             Oculos = (Shapes.Path)escopo.FindName(p + "Oculos");
@@ -484,6 +566,40 @@ namespace ClaudeWidget
             foreach (var parte in chapeu.Partes)
                 Chapeu.Children.Add(new Shapes.Path { Fill = Arte.Pincel(parte[0]), Data = Geometry.Parse(parte[1]) });
         }
+
+        // Monta as peças do transporte (só refaz quando ele muda)
+        public void Montar(Transporte t)
+        {
+            Assento.Y = t.AssentoY;
+            if (transporte == t.Id) return;
+            transporte = t.Id;
+            Atras.Children.Clear();
+            Frente.Children.Clear();
+            pecas.Clear();
+            foreach (var peca in t.Pecas)
+            {
+                var pincel = Arte.Pincel(peca.Cor);
+                var forma = new Shapes.Path { Data = Geometry.Parse(peca.Desenho), SnapsToDevicePixels = true };
+                if (peca.Traco > 0) { forma.Stroke = pincel; forma.StrokeThickness = peca.Traco; }
+                else forma.Fill = pincel;
+                (peca.Camada == "atras" ? Atras : Frente).Children.Add(forma);
+                pecas.Add(new KeyValuePair<Shapes.Path, string>(forma, peca.Quadro));
+            }
+        }
+
+        // Rodas girando e chama/fumaça piscando enquanto anda; parado fica no quadro "A" e sem chama
+        public void Fase(bool andando, bool alterna)
+        {
+            string fase = andando && alterna ? "B" : "A";
+            foreach (var p in pecas)
+            {
+                bool ver = p.Value == "" || p.Value == fase || (andando && p.Value == "M" + fase);
+                p.Key.Visibility = ver ? Visibility.Visible : Visibility.Hidden;
+            }
+        }
+
+        // Vira para a direita (indo embora) ou volta para a esquerda
+        public void Virar(bool paraDireita) { Espelho.ScaleX = paraDireita ? -1 : 1; }
     }
 
     // Onde estão o Iniciar, os Widgets, os apps e a bandeja numa barra (via UI Automation)
@@ -526,7 +642,8 @@ namespace ClaudeWidget
 
     class Controle
     {
-        const double Altura = 40, Folga = 6, Palco = 56, Chegada = 8, LarguraBarra = 206, Margem = 12;
+        // Palco: área à direita do anel por onde o visitante chega; Fora: onde ele começa e termina, fora da vista
+        const double Altura = 40, Folga = 6, Palco = 56, Fora = Palco + 12, LarguraBarra = 206, Margem = 12;
         const int IntervaloMinutos = 5;
         static readonly string[] ClassesDaShell = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
         static readonly CultureInfo inv = CultureInfo.InvariantCulture;
@@ -556,6 +673,7 @@ namespace ClaudeWidget
         ContextMenu menuAberto;
         IntPtr frenteAoAbrir;
         Arrasto arrasto;
+        string transporteDemo;  // no --demo, troca de transporte a cada visita sem mexer na escolha salva
 
         Forms.NotifyIcon bandeja;
         IntPtr iconeBandeja;
@@ -581,12 +699,25 @@ namespace ClaudeWidget
             Vigiar();
             if (demo)
             {
+                // Passa por todos os transportes, um depois do outro, no primeiro widget (o balão é um só)
+                int proximo = 0;
+                DateTime parouEm = DateTime.MinValue;
                 var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
                 t.Tick += delegate
                 {
-                    t.Stop();
-                    // só no primeiro widget: o balão é um só e iria parar no último monitor
-                    if (widgets.Count > 0) IniciarVisita(widgets.Values.First());
+                    t.Interval = TimeSpan.FromMilliseconds(300);
+                    if (widgets.Count == 0) return;
+                    var w = widgets.Values.First();
+                    if (w.Visita == "fora")
+                    {
+                        transporteDemo = Arte.Transportes[proximo++ % Arte.Transportes.Length].Id;
+                        IniciarVisita(w);
+                    }
+                    else if (w.Visita == "parado")
+                    {
+                        if (parouEm == DateTime.MinValue) parouEm = DateTime.Now;
+                        else if ((DateTime.Now - parouEm).TotalSeconds > 2.5) { parouEm = DateTime.MinValue; PararVisita(w); }
+                    }
                 };
                 t.Start();
             }
@@ -938,6 +1069,12 @@ namespace ClaudeWidget
             menu.Items.Add(new Separator());
             Opcao(menu, "Movimento", delegate { config.Movimento = !config.Movimento; MudouEstilo(); }, () => config.Movimento, w);
             Opcao(menu, "Visitante ao passar o mouse", delegate { config.Visitante = !config.Visitante; MudouEstilo(); }, () => config.Visitante, w);
+            var chegada = Opcao(menu, "Visitante chega de");
+            foreach (var transporte in Arte.Transportes)
+            {
+                var id = transporte.Id;
+                Opcao(chegada, transporte.Nome, delegate { config.Transporte = id; config.Salvar(); }, () => config.Transporte == id, w);
+            }
             menu.Items.Add(new Separator());
             Opcao(menu, "Esconder (fica nos ícones ocultos)", delegate { Esconder(true); });
             Opcao(menu, "Sair", Sair);
@@ -1000,10 +1137,11 @@ namespace ClaudeWidget
                 Texto = (TextBlock)janela.FindName("Texto"),
                 Principal = new Boneco(janela, "M"),
                 Visitante = new Boneco(janela, "V"),
-                VisitaX = Palco,
+                VisitaX = Fora,
             };
-            Canvas.SetTop(w.Visitante.Raiz, (Altura - 20) / 2);
-            Canvas.SetLeft(w.Visitante.Raiz, Palco);
+            // o palco começa 6 px acima do widget (espaço para chapéu, bicicleta e foguete)
+            Canvas.SetTop(w.Visitante.Raiz, (Altura - 20) / 2 + Folga);
+            Canvas.SetLeft(w.Visitante.Raiz, Fora);
             w.Visitante.Raiz.Visibility = Visibility.Hidden;
             CriarMenu(w);
 
@@ -1242,7 +1380,7 @@ namespace ClaudeWidget
                 {
                     EsconderBalao(w);
                     w.Visita = "fora";
-                    w.VisitaX = Palco;
+                    w.VisitaX = Fora;
                     w.Visitante.Raiz.Visibility = Visibility.Hidden;
                     w.Janela.Hide();
                 }
@@ -1287,16 +1425,31 @@ namespace ClaudeWidget
             foreach (var w in widgets.Values) PassoDaVisita(w, mexer);
         }
 
-        // Visitante: chega andando pela direita quando o mouse entra e vai embora quando sai
+        // Visitante: chega pela direita (a pé, de skate, bicicleta, carro ou foguete) quando o mouse entra
+        // e vai embora quando sai
+        Transporte TransporteAtual() { return Arte.AcharTransporte(transporteDemo ?? config.Transporte); }
+
         void IniciarVisita(Widget w)
         {
             if (w.Arrastando || Ordem.Pausado || escondido) return;
             if (!config.Visitante || w.Visita == "parado") { MostrarBalao(w); return; }
             if (w.Visita != "entrando")
             {
+                w.Visitante.Montar(TransporteAtual());
+                w.Visitante.Virar(false);
                 w.Visita = "entrando";
                 w.Visitante.Raiz.Visibility = Visibility.Visible;
             }
+        }
+
+        // O quadro do visitante andando, conforme o transporte: pernas, balanço e para onde olha
+        static Quadro QuadroAndando(Transporte t, bool par)
+        {
+            var q = new Quadro { Olhar = -2 };
+            if (t.Pernas == "andar" || t.Pernas == "pedalar") q.Pe = par ? "A" : "B";
+            else if (t.Pernas == "encolhidas") q.Pe = "T";
+            if (t.Balanca && par) q.Y = -1;
+            return q;
         }
 
         void PararVisita(Widget w)
@@ -1310,35 +1463,48 @@ namespace ClaudeWidget
             if (w.Visita == "fora") return;
             w.Passo++;
             bool par = w.Passo % 2 == 0;
-            double passo = mexer ? 6 : 100;
-            var q = new Quadro();
+            var t = TransporteAtual();
+            double passo = mexer ? t.Velocidade : 100;
+            Quadro q;
+            bool andando = true;
             if (w.Visita == "entrando")
             {
-                w.VisitaX = Math.Max(Chegada, w.VisitaX - passo);
-                if (w.VisitaX <= Chegada)
+                w.VisitaX = Math.Max(t.Parada, w.VisitaX - passo);
+                q = QuadroAndando(t, par);
+                if (w.VisitaX <= t.Parada)
                 {
+                    // chegou: para, desliga chama e fumaça e mostra o balão
                     w.Visita = "parado";
                     w.Passo = 0;
-                    q.Olhar = -2;
+                    andando = false;
+                    q = new Quadro { Olhar = -2, Pe = t.Pernas == "encolhidas" ? "T" : "N" };
                     Canvas.SetLeft(w.Visitante.Raiz, w.VisitaX);
                     MostrarBalao(w);
                 }
-                else q = new Quadro { Y = par ? -1 : 0, Olhar = -2, Pe = par ? "A" : "B" };
             }
-            else if (w.Visita == "parado") q = new Quadro { Olhar = -2, Fechado = w.Passo % 30 >= 28 };
-            else if (w.Visita == "saindo")
+            else if (w.Visita == "parado")
             {
-                w.VisitaX = Math.Min(Palco, w.VisitaX + passo);
-                q = new Quadro { Y = par ? -1 : 0, Olhar = 2, Pe = par ? "A" : "B" };
-                if (w.VisitaX >= Palco)
+                andando = false;
+                q = new Quadro { Olhar = -2, Fechado = w.Passo % 30 >= 28, Pe = t.Pernas == "encolhidas" ? "T" : "N" };
+            }
+            else
+            {
+                // indo embora: vira para a direita (com o espelho, olhar -2 fica olhando para a direita)
+                w.Visitante.Virar(true);
+                w.VisitaX = Math.Min(Fora, w.VisitaX + passo);
+                q = QuadroAndando(t, par);
+                if (w.VisitaX >= Fora)
                 {
                     w.Visita = "fora";
                     w.Visitante.Raiz.Visibility = Visibility.Hidden;
+                    w.Visitante.Virar(false);
+                    andando = false;
                     q = new Quadro();
                 }
             }
             Canvas.SetLeft(w.Visitante.Raiz, w.VisitaX);
             w.Visitante.Aplicar(q);
+            w.Visitante.Fase(andando, par);
         }
     }
 
