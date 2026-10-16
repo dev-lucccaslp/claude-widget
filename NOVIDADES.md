@@ -1,5 +1,12 @@
 # Novidades
 
+## v1.4.0
+
+- **Bom dia, boa tarde, boa noite:** quando você liga o PC, o mascote dá oi com o seu nome e um resumo do uso. Se você desbloquear o PC em outro período do dia (saiu de manhã, voltou de tarde), ele cumprimenta de novo.
+- **Lembretes divertidos** num balãozinho em cima do mascote, a cada 1 hora: tomar água 💧, alongar e postura 🙆, descansar a vista 👀. E os horários especiais: almoço, café, fim do dia e "Sextou!" 🎉.
+- **Menu "Lembretes":** liga e desliga cada tipo, escolhe a frequência (30 minutos, 1 hora ou 2 horas) e tem "Mostrar um agora".
+- Ele não fala nada se você estiver longe do PC, em tela cheia, com o menu aberto ou olhando o uso. Com o widget escondido, o lembrete vira um aviso do Windows.
+
 ## v1.3.0
 
 - **Avisa quando sai versão nova:** a cada 12 horas o widget olha a página de Releases. Quando tem versão nova, aparece um aviso: um clique e ele baixa, troca e reabre sozinho. Também dá para usar `ClaudeWidget.exe --atualizar`, ou desligar o aviso no ícone.

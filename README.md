@@ -15,6 +15,8 @@ O mascote do **Claude Code** morando na sua barra de tarefas do Windows, com um 
   - um gráfico dos **últimos 7 dias**, com quanto do limite semanal você gastou em cada dia.
 - **O visitante chega do jeito que você quiser:** a pé, de skate, bicicleta, carro, foguete, patinete, disco voador ou tapete mágico.
 - **Reage ao seu uso:** perto de 90%, o mascote fica cansado, suando e ofegante. Quando o limite renova, ele comemora com pulos e confete.
+- **Dá bom dia, boa tarde ou boa noite** quando você liga ou desbloqueia o PC, já com um resumo do uso ("Sessão em 21% e semana em 98%. Vai com calma hoje 😅").
+- **Lembretes divertidos** num balãozinho em cima do mascote: tomar água, alongar e postura, descansar a vista, e os horários de almoço, café, fim do dia e o "Sextou!". Você escolhe quais e de quanto em quanto tempo. Ele não fala nada se você estiver longe do PC, em tela cheia ou olhando o uso.
 - **Se mexe o tempo todo:** anda, respira, olha em volta, pula, dança e pisca. Dá para desligar.
 - **Clique no anel** para atualizar na hora. Sozinho, ele atualiza a cada 5 minutos.
 - **Clique no mascote** (ou botão direito) para personalizar: o que mostrar, cor, chapéu, óculos escuros, posição, movimento e o visitante.
@@ -78,7 +80,8 @@ O que mudou em cada versão está em [NOVIDADES.md](NOVIDADES.md).
 | --- | --- |
 | Passar o mouse | O visitante chega com o balão de uso e o gráfico da semana |
 | Clicar no anel | Atualiza o número na hora |
-| Clicar no mascote ou botão direito | Abre o menu: mostrar %, cor, chapéu (e o da estação), óculos, posição, movimento, visitante (e como ele chega), esconder, sair |
+| Clicar no mascote ou botão direito | Abre o menu: mostrar %, cor, chapéu (e o da estação), óculos, posição, movimento, visitante (e como ele chega), lembretes, esconder, sair |
+| Clicar no balãozinho de fala | Fecha a saudação ou o lembrete |
 | Segurar e arrastar | Muda o widget de lugar na barra |
 | Ícone nos ícones ocultos | Clique para esconder ou mostrar. No botão direito: atualizar o uso, mostrar %, iniciar com o Windows, avisar de versão nova, ver novidades e sair |
 | Abrir o .exe de novo | Se ele estiver escondido, aparece de novo |
@@ -89,7 +92,7 @@ Linha de comando:
 | --- | --- |
 | `ClaudeWidget.exe --atualizar` | Procura versão nova no GitHub e, se tiver, atualiza na hora |
 | `ClaudeWidget.exe --sair` | Fecha o widget que estiver aberto |
-| `ClaudeWidget.exe --demo` | Comemora e passa o visitante por todos os transportes (bom para gravar um vídeo) |
+| `ClaudeWidget.exe --demo` | Dá oi, comemora, mostra um lembrete e passa o visitante por todos os transportes (bom para gravar um vídeo) |
 
 As escolhas ficam em `%LOCALAPPDATA%\ClaudeWidget\config.json` e o histórico do gráfico em `historico.json`, na mesma pasta. Se algo der errado, o erro fica anotado em `erros.log` e o widget continua aberto.
 

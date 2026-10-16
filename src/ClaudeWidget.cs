@@ -43,8 +43,8 @@ using Shapes = System.Windows.Shapes;
 [assembly: AssemblyProduct("Claude Widget")]
 [assembly: AssemblyDescription("O mascote do Claude Code na barra de tarefas, com o uso do plano")]
 [assembly: AssemblyCopyright("MIT - github.com/dev-lucccaslp/claude-widget")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
 
 namespace ClaudeWidget
 {
@@ -82,6 +82,17 @@ namespace ClaudeWidget
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
 
+        [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+        [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
+        // Há quanto tempo ninguém mexe no mouse ou no teclado
+        public static TimeSpan Ocioso()
+        {
+            var info = new LASTINPUTINFO { cbSize = 8 };
+            if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+            return TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.dwTime));
+        }
+
         public const int GWL_EXSTYLE = -20;
         public const int WS_EX_TOOLWINDOW = 0x80, WS_EX_TRANSPARENT = 0x20, WS_EX_NOACTIVATE = 0x08000000;
     }
@@ -91,7 +102,7 @@ namespace ClaudeWidget
     static class Ordem
     {
         public static readonly List<IntPtr> Widgets = new List<IntPtr>();
-        public static IntPtr Balao = IntPtr.Zero;
+        public static IntPtr Balao = IntPtr.Zero, Fala = IntPtr.Zero;
         public static bool Pausado;
         static readonly IntPtr SempreVisivel = new IntPtr(-1);
 
@@ -99,6 +110,7 @@ namespace ClaudeWidget
         {
             if (Pausado) return;
             foreach (var h in Widgets) Win32.SetWindowPos(h, SempreVisivel, 0, 0, 0, 0, 0x0213);
+            if (Fala != IntPtr.Zero) Win32.SetWindowPos(Fala, SempreVisivel, 0, 0, 0, 0, 0x0213);
             if (Balao != IntPtr.Zero) Win32.SetWindowPos(Balao, SempreVisivel, 0, 0, 0, 0, 0x0213);
         }
     }
@@ -123,12 +135,20 @@ namespace ClaudeWidget
         public bool ChapeuEstacao { get; set; }  // Natal em dezembro, abóbora no Halloween, palha na festa junina...
         public bool AvisarVersaoNova { get; set; }
         public string VersaoAvisada { get; set; }  // para avisar de cada versão nova uma vez só
+        // Lembretes do mascote
+        public bool Saudacao { get; set; }        // bom dia, boa tarde, boa noite ao ligar o PC
+        public bool LembreteAgua { get; set; }
+        public bool LembreteAlongar { get; set; }
+        public bool LembreteVista { get; set; }
+        public bool LembreteHorarios { get; set; }  // almoço, café, fim do dia, sextou
+        public int IntervaloLembretes { get; set; }  // minutos
         public Dictionary<string, Posicao> Posicoes { get; set; }
 
         public Config()
         {
             Cor = Arte.Laranja; Chapeu = "nenhum"; Movimento = true; Visitante = true; Mostrar = "maior"; Transporte = "pe";
             ChapeuEstacao = true; AvisarVersaoNova = true;
+            Saudacao = true; LembreteAgua = true; LembreteAlongar = true; LembreteVista = true; LembreteHorarios = true; IntervaloLembretes = 60;
             Posicoes = new Dictionary<string, Posicao>();
         }
 
@@ -145,6 +165,7 @@ namespace ClaudeWidget
                 if (string.IsNullOrEmpty(c.Chapeu)) c.Chapeu = "nenhum";
                 if (c.Mostrar != "sessao" && c.Mostrar != "semanal") c.Mostrar = "maior";
                 c.Transporte = Arte.AcharTransporte(c.Transporte).Id;
+                if (c.IntervaloLembretes != 30 && c.IntervaloLembretes != 60 && c.IntervaloLembretes != 120) c.IntervaloLembretes = 60;
                 return c;
             }
             catch { return new Config(); }
@@ -384,6 +405,56 @@ namespace ClaudeWidget
                 if (indice >= 0 && indice < dias) resultado[indice] += subida;
             }
             return resultado;
+        }
+    }
+
+    // --- O que o mascote fala: saudação e lembretes ---
+    static class Falas
+    {
+        public static string Periodo(DateTime d) { return d.Hour >= 5 && d.Hour < 12 ? "manha" : d.Hour >= 12 && d.Hour < 18 ? "tarde" : "noite"; }
+
+        public static string Saudacao(DateTime agora, string nome, Uso uso)
+        {
+            var periodo = Periodo(agora);
+            var texto = (periodo == "manha" ? "Bom dia" : periodo == "tarde" ? "Boa tarde" : "Boa noite") + (nome != null ? ", " + nome : "") + "! "
+                + (periodo == "manha" ? "☀️" : periodo == "tarde" ? "🌤️" : "🌙");
+            if (agora.DayOfWeek == DayOfWeek.Monday && periodo == "manha") texto += " Bora começar a semana!";
+            if (agora.DayOfWeek == DayOfWeek.Friday) texto += " Sextou!";
+            if (uso != null && uso.Erro == null && uso.Hora != "Carregando…")
+            {
+                texto += "\nSessão em " + uso.Sessao + "% e semana em " + uso.Semana + "%.";
+                if (Math.Max(uso.Sessao, uso.Semana) >= 90) texto += " Vai com calma hoje 😅";
+                else if (uso.Semana < 30) texto += " Bastante limite pela frente 🚀";
+            }
+            return texto;
+        }
+
+        public static readonly string[] Agua =
+        {
+            "Não esquece de tomar água! 💧", "Hora de um gole de água 💧", "Hidratação em dia? Bebe uma água aí 💧",
+            "Água! Seu cérebro agradece 💧", "Já encheu a garrafinha hoje? 💧",
+        };
+        public static readonly string[] Alongar =
+        {
+            "Levanta e estica as costas um pouquinho 🙆", "Postura! Costas retas e ombros relaxados 😄",
+            "Que tal uma caminhada rápida? 🚶", "Gira o pescoço devagar, ele merece 🙂", "Estica os braços pro alto, bem alto! 🙌",
+        };
+        public static readonly string[] Vista =
+        {
+            "Olha para longe por 20 segundos, seus olhos agradecem 👀", "Pisca bastante e descansa a vista um pouco 👀",
+            "Tira os olhos da tela um minutinho 👀",
+        };
+
+        // Uma vez por dia, em certos horários
+        public static string DoHorario(DateTime d)
+        {
+            int minutos = d.Hour * 60 + d.Minute;
+            bool util = d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday;
+            if (minutos >= 12 * 60 && minutos < 12 * 60 + 30) return "almoco|Hora do almoço! Vai comer alguma coisa 🍽️";
+            if (minutos >= 15 * 60 + 30 && minutos < 16 * 60) return "cafe|Pausa pro café? ☕";
+            if (util && d.DayOfWeek == DayOfWeek.Friday && minutos >= 16 * 60 && minutos < 17 * 60) return "sextou|Sextou! Bom fim de semana 🎉";
+            if (util && minutos >= 18 * 60 && minutos < 18 * 60 + 30) return "encerrar|Bora encerrar o dia? Amanhã tem mais 🚀";
+            return null;
         }
     }
 
@@ -804,6 +875,23 @@ namespace ClaudeWidget
     </StackPanel>
   </Grid>
 </Window>";
+
+        // Balãozinho de fala do mascote (saudação e lembretes); clique para fechar
+        public const string XamlFala = @"
+<Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+        WindowStyle='None' AllowsTransparency='True' Background='Transparent' Topmost='True' ShowInTaskbar='False'
+        ShowActivated='False' Focusable='False' ResizeMode='NoResize' SizeToContent='WidthAndHeight' UseLayoutRounding='True'
+        FontFamily='Segoe UI Variable Text, Segoe UI, Segoe UI Emoji' Cursor='Hand'>
+  <Grid Margin='8'>
+    <Grid.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Opacity='0.4' Color='Black'/></Grid.Effect>
+    <StackPanel>
+      <Border Background='{DynamicResource Fundo}' BorderBrush='{DynamicResource Borda}' BorderThickness='1' CornerRadius='10' Padding='12,8,12,9' MaxWidth='250'>
+        <TextBlock x:Name='Mensagem' Foreground='{DynamicResource Texto}' FontSize='12.5' TextWrapping='Wrap' LineHeight='18'/>
+      </Border>
+      <Path x:Name='Bico' Data='M0,0 L8,8 L16,0' Fill='{DynamicResource Fundo}' Stroke='{DynamicResource Borda}' StrokeThickness='1' HorizontalAlignment='Left' Margin='16,-1,0,0'/>
+    </StackPanel>
+  </Grid>
+</Window>";
     }
 
     // Um mascote (o principal ou o visitante): aplica quadros de animação e o estilo escolhido
@@ -996,6 +1084,16 @@ namespace ClaudeWidget
         readonly List<Confete> confetes = new List<Confete>();
         DispatcherTimer queda;
 
+        // fala do mascote: saudação e lembretes
+        Window fala;
+        TextBlock mensagem;
+        Shapes.Path bicoFala;
+        DispatcherTimer fimFala;
+        DateTime ultimoLembrete = DateTime.Now, ultimaSaudacao = DateTime.MinValue, diaFalados = DateTime.Today;
+        string periodoSaudado;
+        int proximaCategoria;
+        readonly HashSet<string> faladosHoje = new HashSet<string>();
+
         ContextMenu menuAberto;
         IntPtr frenteAoAbrir;
         Arrasto arrasto;
@@ -1016,9 +1114,17 @@ namespace ClaudeWidget
             SystemEvents.UserPreferenceChanged += delegate { app.Dispatcher.BeginInvoke(new Action(ConferirTema)); };
 
             CriarBalao();
+            CriarFala();
             CriarBandeja();
             // Se o "Iniciar com o Windows" aponta para um .exe antigo, passa a abrir o atual
             if (IniciaComWindows()) IniciarComWindows(true);
+
+            // Lembretes: confere a cada minuto. Desbloqueou o PC num outro período do dia: dá oi de novo.
+            NovoTimer(60000, ConferirLembretes);
+            SystemEvents.SessionSwitch += (s, e) =>
+            {
+                if (e.Reason == SessionSwitchReason.SessionUnlock) app.Dispatcher.BeginInvoke(new Action(delegate { Depois(2500, SaudarDeNovo); }));
+            };
 
             animacao = NovoTimer(120, TicAnimacao);
             vigia = NovoTimer(300, Vigiar);
@@ -1043,16 +1149,24 @@ namespace ClaudeWidget
 
             AtualizarUso();
             Vigiar();
-            if (demo)
+            if (!demo)
             {
-                // Comemora logo ao abrir, para ver o confete
-                var festa = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
-                festa.Tick += delegate { festa.Stop(); Comemorar(); };
-                festa.Start();
+                // Saudação: espera o primeiro número do uso chegar (até uns 12 s) para já dar o resumo
+                int espera = 0;
+                var oi = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                oi.Tick += delegate { if (temLeitura || ++espera >= 12) { oi.Stop(); Saudar(); } };
+                oi.Start();
+            }
+            else
+            {
+                // Demonstração: oi, confete, um lembrete e depois todos os transportes
+                Depois(800, delegate { Saudar(true); });
+                Depois(1500, Comemorar);
+                Depois(4000, MostrarLembreteAgora);
                 // Passa por todos os transportes, um depois do outro, no primeiro widget (o balão é um só)
                 int proximo = 0;
                 DateTime parouEm = DateTime.MinValue;
-                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
                 t.Tick += delegate
                 {
                     t.Interval = TimeSpan.FromMilliseconds(300);
@@ -1081,6 +1195,131 @@ namespace ClaudeWidget
             return t;
         }
 
+        // Faz uma vez, daqui a tantos milissegundos
+        static void Depois(int ms, Action acao)
+        {
+            var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+            t.Tick += delegate { t.Stop(); acao(); };
+            t.Start();
+        }
+
+        // --- Fala do mascote: saudação e lembretes ---
+        void CriarFala()
+        {
+            fala = (Window)XamlReader.Parse(Arte.XamlFala);
+            mensagem = (TextBlock)fala.FindName("Mensagem");
+            bicoFala = (Shapes.Path)fala.FindName("Bico");
+            var h = new WindowInteropHelper(fala).EnsureHandle();
+            Win32.SetWindowLong(h, Win32.GWL_EXSTYLE, Win32.GetWindowLong(h, Win32.GWL_EXSTYLE) | Win32.WS_EX_NOACTIVATE | Win32.WS_EX_TOOLWINDOW);
+            Ordem.Fala = h;
+            fala.MouseLeftButtonUp += delegate { EsconderFala(); };
+            fimFala = new DispatcherTimer();
+            fimFala.Tick += delegate { EsconderFala(); };
+        }
+
+        // Mostra a fala em cima do mascote do primeiro monitor. Com o widget escondido, vira um aviso do Windows.
+        // Devolve false se não deu agora (balão de uso aberto, menu aberto, tela cheia): tenta de novo depois.
+        bool Falar(string texto)
+        {
+            if (escondido)
+            {
+                balaoDeVersaoNova = false;
+                bandeja.ShowBalloonTip(8000, "Claude Widget", texto, Forms.ToolTipIcon.None);
+                return true;
+            }
+            var w = widgets.Values.FirstOrDefault(x => x.Janela.IsVisible);
+            if (w == null || Ordem.Pausado || donoBalao != null) return false;
+            mensagem.Text = texto;
+            var cartaoFala = (FrameworkElement)fala.Content;
+            cartaoFala.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var tamanho = cartaoFala.DesiredSize;
+            double alvo = w.Janela.Left + 24;  // o meio do mascote
+            double esquerda = alvo - 32;
+            if (!double.IsNaN(w.TelaE)) esquerda = Math.Max(w.TelaE + 4, Math.Min(w.TelaD - tamanho.Width - 4, esquerda));
+            bicoFala.Margin = new Thickness(Math.Max(10, Math.Min(tamanho.Width - 42, alvo - esquerda - 16)), -1, 0, 0);
+            fala.Left = esquerda;
+            fala.Top = w.Janela.Top + Folga + 4 - (tamanho.Height - 8);
+            if (!fala.IsVisible) fala.Show();
+            Ordem.Elevar();
+            fimFala.Stop();
+            fimFala.Interval = TimeSpan.FromSeconds(Math.Max(8, texto.Length / 7.0));
+            fimFala.Start();
+            Animar("pular");
+            return true;
+        }
+
+        void EsconderFala()
+        {
+            fimFala.Stop();
+            if (fala.IsVisible) fala.Hide();
+        }
+
+        // O primeiro nome da conta do Windows ("lucas.lessa" vira "Lucas"); se não parecer um nome, não usa
+        static string PrimeiroNome()
+        {
+            try
+            {
+                var nome = Environment.UserName.Split('.', '_', '-', ' ')[0];
+                if (nome.Length < 2 || nome.Any(char.IsDigit)) return null;
+                return char.ToUpper(nome[0]) + nome.Substring(1).ToLower();
+            }
+            catch { return null; }
+        }
+
+        void Saudar() { Saudar(false); }
+
+        void Saudar(bool forcar)
+        {
+            if (!config.Saudacao && !forcar) return;
+            if (!Falar(Falas.Saudacao(DateTime.Now, PrimeiroNome(), temLeitura ? uso : null))) return;
+            ultimaSaudacao = DateTime.Now;
+            periodoSaudado = Falas.Periodo(DateTime.Now);
+        }
+
+        // Voltou ao PC: se mudou o período do dia (ou passou bastante tempo), dá oi de novo
+        void SaudarDeNovo()
+        {
+            if (!config.Saudacao) return;
+            if (Falas.Periodo(DateTime.Now) == periodoSaudado && (DateTime.Now - ultimaSaudacao).TotalHours < 4) return;
+            Saudar();
+        }
+
+        string ProximoLembrete()
+        {
+            var categorias = new List<string[]>();
+            if (config.LembreteAgua) categorias.Add(Falas.Agua);
+            if (config.LembreteAlongar) categorias.Add(Falas.Alongar);
+            if (config.LembreteVista) categorias.Add(Falas.Vista);
+            if (categorias.Count == 0) return null;
+            var lista = categorias[proximaCategoria++ % categorias.Count];
+            return lista[sorteio.Next(lista.Length)];
+        }
+
+        void ConferirLembretes()
+        {
+            var agora = DateTime.Now;
+            if (agora.Date != diaFalados) { faladosHoje.Clear(); diaFalados = agora.Date; }
+            if (Win32.Ocioso().TotalMinutes >= 5) return;  // longe do PC: não fala sozinho
+            if (config.LembreteHorarios)
+            {
+                var doHorario = Falas.DoHorario(agora);
+                if (doHorario != null)
+                {
+                    var partes = doHorario.Split('|');
+                    if (!faladosHoje.Contains(partes[0]) && Falar(partes[1])) { faladosHoje.Add(partes[0]); ultimoLembrete = agora; return; }
+                }
+            }
+            if ((agora - ultimoLembrete).TotalMinutes < config.IntervaloLembretes) return;
+            var texto = ProximoLembrete();
+            if (texto != null && Falar(texto)) ultimoLembrete = agora;
+        }
+
+        // "Mostrar um agora": espera o menu fechar antes de falar
+        void MostrarLembreteAgora()
+        {
+            Depois(400, delegate { Falar(ProximoLembrete() ?? Falas.Agua[0]); });
+        }
+
         // --- Mostrar, esconder, sair ---
         public void Mostrar()
         {
@@ -1095,6 +1334,7 @@ namespace ClaudeWidget
             escondido = true;
             if (menuAberto != null) menuAberto.IsOpen = false;
             EsconderBalao(null);
+            EsconderFala();
             foreach (var w in widgets.Values) { PararVisita(w); w.Janela.Hide(); }
         }
 
@@ -1354,6 +1594,7 @@ namespace ClaudeWidget
         // O bico aponta para o visitante (ou para o anel, se o visitante estiver desligado); o balão não sai da tela
         void MostrarBalao(Widget w)
         {
+            EsconderFala();
             PreencherBalao();
             donoBalao = w;
             double alvo = w.Visita == "parado" ? w.Janela.Left + w.Fundo.ActualWidth + w.VisitaX + 16 : w.Janela.Left + 64;
@@ -1771,6 +2012,21 @@ namespace ClaudeWidget
                 var id = transporte.Id;
                 Opcao(chegada, transporte.Nome, delegate { config.Transporte = id; config.Salvar(); }, () => config.Transporte == id, w);
             }
+
+            var lembretes = Opcao(menu, "Lembretes");
+            Opcao(lembretes, "Saudação (bom dia, boa tarde, boa noite)", delegate { config.Saudacao = !config.Saudacao; config.Salvar(); }, () => config.Saudacao, w);
+            Opcao(lembretes, "Beber água", delegate { config.LembreteAgua = !config.LembreteAgua; config.Salvar(); }, () => config.LembreteAgua, w);
+            Opcao(lembretes, "Alongar e postura", delegate { config.LembreteAlongar = !config.LembreteAlongar; config.Salvar(); }, () => config.LembreteAlongar, w);
+            Opcao(lembretes, "Descansar a vista", delegate { config.LembreteVista = !config.LembreteVista; config.Salvar(); }, () => config.LembreteVista, w);
+            Opcao(lembretes, "Almoço, café e fim do dia", delegate { config.LembreteHorarios = !config.LembreteHorarios; config.Salvar(); }, () => config.LembreteHorarios, w);
+            lembretes.Items.Add(new Separator());
+            foreach (var frequencia in new[] { new[] { "A cada 30 minutos", "30" }, new[] { "A cada 1 hora", "60" }, new[] { "A cada 2 horas", "120" } })
+            {
+                int minutos = int.Parse(frequencia[1]);
+                Opcao(lembretes, frequencia[0], delegate { config.IntervaloLembretes = minutos; config.Salvar(); }, () => config.IntervaloLembretes == minutos, w);
+            }
+            lembretes.Items.Add(new Separator());
+            Opcao(lembretes, "Mostrar um agora", MostrarLembreteAgora);
             menu.Items.Add(new Separator());
             Opcao(menu, "Esconder (fica nos ícones ocultos)", delegate { Esconder(true); });
             Opcao(menu, "Sair", Sair);
@@ -2134,6 +2390,7 @@ namespace ClaudeWidget
         void IniciarVisita(Widget w)
         {
             if (w.Arrastando || Ordem.Pausado || escondido) return;
+            EsconderFala();
             if (!config.Visitante || w.Visita == "parado") { MostrarBalao(w); return; }
             if (w.Visita != "entrando")
             {
