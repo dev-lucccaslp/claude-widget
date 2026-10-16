@@ -2,13 +2,16 @@
 // https://github.com/dev-lucccaslp/claude-widget
 //
 // Compilado com o csc do .NET Framework 4.x que já vem no Windows (por isso C# 5): veja build.ps1.
-// Lê o login do Claude Code em %USERPROFILE%\.claude\.credentials.json e só conversa com api.anthropic.com.
-// Não renova nem grava o login. As escolhas do menu ficam em %LOCALAPPDATA%\ClaudeWidget\config.json.
+// Lê o login do Claude Code em %USERPROFILE%\.claude\.credentials.json e consulta o uso em api.anthropic.com.
+// Não renova nem grava o login. Fora isso, só olha a página de Releases no GitHub para avisar de versão nova
+// (dá para desligar no ícone). As escolhas ficam em %LOCALAPPDATA%\ClaudeWidget\config.json e o histórico
+// do gráfico em historico.json, na mesma pasta.
 //
-// Linha de comando: ClaudeWidget.exe [--sair] [--demo]
-//   sem nada  abre; se já estiver aberto, só mostra o widget de novo
-//   --sair    fecha a cópia aberta (o instalador usa antes de trocar o .exe)
-//   --demo    chama o visitante e o balão logo ao abrir, para testar sem mouse
+// Linha de comando: ClaudeWidget.exe [--sair] [--atualizar] [--demo]
+//   sem nada     abre; se já estiver aberto, só mostra o widget de novo (ou assume o lugar, se for mais novo)
+//   --sair       fecha a cópia aberta (o instalador usa antes de trocar o .exe)
+//   --atualizar  procura versão nova no GitHub e, se tiver, baixa e troca na hora
+//   --demo       comemora e passa o visitante por todos os transportes, para testar sem mouse
 
 using System;
 using System.Collections.Generic;
@@ -40,8 +43,8 @@ using Shapes = System.Windows.Shapes;
 [assembly: AssemblyProduct("Claude Widget")]
 [assembly: AssemblyDescription("O mascote do Claude Code na barra de tarefas, com o uso do plano")]
 [assembly: AssemblyCopyright("MIT - github.com/dev-lucccaslp/claude-widget")]
-[assembly: AssemblyVersion("1.2.1.0")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace ClaudeWidget
 {
@@ -116,12 +119,16 @@ namespace ClaudeWidget
         public bool Movimento { get; set; }
         public bool Visitante { get; set; }
         public string Mostrar { get; set; }  // maior, sessao ou semanal
-        public string Transporte { get; set; }  // como o visitante chega: pe, skate, bike, carro ou foguete
+        public string Transporte { get; set; }  // como o visitante chega (Arte.Transportes)
+        public bool ChapeuEstacao { get; set; }  // Natal em dezembro, abóbora no Halloween, palha na festa junina...
+        public bool AvisarVersaoNova { get; set; }
+        public string VersaoAvisada { get; set; }  // para avisar de cada versão nova uma vez só
         public Dictionary<string, Posicao> Posicoes { get; set; }
 
         public Config()
         {
             Cor = Arte.Laranja; Chapeu = "nenhum"; Movimento = true; Visitante = true; Mostrar = "maior"; Transporte = "pe";
+            ChapeuEstacao = true; AvisarVersaoNova = true;
             Posicoes = new Dictionary<string, Posicao>();
         }
 
@@ -167,11 +174,15 @@ namespace ClaudeWidget
         public int Sessao, Semana;
         public string RenovaSessao = "", RenovaSemana = "", Hora = "Carregando…";
         public string Erro;
+        public List<string[]> Modelos = new List<string[]>();  // limites semanais por modelo: nome, %, quando renova
+        public string Creditos;          // créditos extras ou gasto além do plano, se a conta tiver
+        public double CreditosPct = -1;  // < 0: sem barra
     }
 
     static class ApiUso
     {
         static readonly CultureInfo ptBR = new CultureInfo("pt-BR");
+        static readonly CultureInfo inv = CultureInfo.InvariantCulture;
 
         public static string Credenciais
         {
@@ -204,6 +215,8 @@ namespace ClaudeWidget
                 uso.Semana = Pct(u, "seven_day");
                 uso.RenovaSessao = Renova(u, "five_hour", "'às' HH:mm");
                 uso.RenovaSemana = Renova(u, "seven_day", "ddd HH:mm");
+                LerModelos(u, uso);
+                LerCreditos(u, uso);
                 uso.Hora = "Atualizado às " + DateTime.Now.ToString("HH:mm");
             }
             catch (WebException ex)
@@ -239,6 +252,138 @@ namespace ClaudeWidget
             if (l == null || !l.TryGetValue("resets_at", out v) || v == null) return "";
             if (!DateTimeOffset.TryParse(v.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out quando)) return "";
             return "renova " + quando.LocalDateTime.ToString(formato, ptBR);
+        }
+
+        // Anda por objetos aninhados do JSON: Valor(u, "scope", "model", "display_name")
+        static object Valor(Dictionary<string, object> d, params string[] caminho)
+        {
+            object atual = d;
+            foreach (var chave in caminho)
+            {
+                var dic = atual as Dictionary<string, object>;
+                if (dic == null || !dic.TryGetValue(chave, out atual)) return null;
+            }
+            return atual;
+        }
+
+        static int Inteiro(object v) { return (int)Math.Round(Convert.ToDouble(v, inv)); }
+
+        // Limites semanais por modelo: a lista "limits" (weekly_scoped) e, nas contas que ainda têm, seven_day_opus/sonnet
+        static void LerModelos(Dictionary<string, object> u, Uso uso)
+        {
+            var lista = Valor(u, "limits") as System.Collections.IEnumerable;
+            if (lista != null)
+                foreach (var item in lista)
+                {
+                    var l = item as Dictionary<string, object>;
+                    if (l == null || (Valor(l, "kind") as string) != "weekly_scoped") continue;
+                    var nome = Valor(l, "scope", "model", "display_name") as string;
+                    var pct = Valor(l, "percent");
+                    if (nome == null || pct == null) continue;
+                    uso.Modelos.Add(new[] { nome, Inteiro(pct).ToString(), RenovaDe(l) });
+                }
+            foreach (var par in new[] { new[] { "seven_day_opus", "Opus" }, new[] { "seven_day_sonnet", "Sonnet" } })
+            {
+                var l = Limite(u, par[0]);
+                var pct = l == null ? null : Valor(l, "utilization");
+                var nome = par[1];
+                if (pct == null || uso.Modelos.Any(m => m[0] == nome)) continue;
+                uso.Modelos.Add(new[] { nome, Inteiro(pct).ToString(), RenovaDe(l) });
+            }
+        }
+
+        static string RenovaDe(Dictionary<string, object> limite)
+        {
+            return Renova(new Dictionary<string, object> { { "x", limite } }, "x", "ddd HH:mm");
+        }
+
+        // Gasto além do plano (valor em centavos + expoente) ou, se não tiver, os créditos extras do mês (em %)
+        static void LerCreditos(Dictionary<string, object> u, Uso uso)
+        {
+            var gasto = Limite(u, "spend");
+            if (gasto != null && Valor(gasto, "enabled") is bool && (bool)Valor(gasto, "enabled") && Valor(gasto, "used", "amount_minor") != null)
+            {
+                uso.Creditos = "Gasto além do plano: " + Dinheiro(Valor(gasto, "used") as Dictionary<string, object>);
+                var limite = Valor(gasto, "limit") as Dictionary<string, object>;
+                if (limite != null && limite.ContainsKey("amount_minor")) uso.Creditos += " de " + Dinheiro(limite);
+                var pct = Valor(gasto, "percent");
+                if (limite != null && pct != null) uso.CreditosPct = Convert.ToDouble(pct, inv);
+                return;
+            }
+            var extra = Limite(u, "extra_usage");
+            if (extra != null && Valor(extra, "is_enabled") is bool && (bool)Valor(extra, "is_enabled"))
+            {
+                var pct = Valor(extra, "utilization");
+                if (pct == null) { uso.Creditos = "Créditos extras ligados"; return; }
+                uso.CreditosPct = Convert.ToDouble(pct, inv);
+                uso.Creditos = "Créditos extras: " + Inteiro(pct) + "% do limite do mês";
+            }
+        }
+
+        static string Dinheiro(Dictionary<string, object> valor)
+        {
+            double centavos = Convert.ToDouble(Valor(valor, "amount_minor"), inv);
+            var exp = Valor(valor, "exponent");
+            int casas = exp == null ? 2 : Convert.ToInt32(exp, inv);
+            var moeda = (Valor(valor, "currency") as string) ?? "";
+            var simbolo = moeda == "USD" ? "US$ " : moeda == "BRL" ? "R$ " : moeda == "EUR" ? "€ " : moeda + " ";
+            return simbolo + (centavos / Math.Pow(10, casas)).ToString("N2", ptBR);
+        }
+    }
+
+    // --- Histórico do uso semanal, para o gráfico dos últimos 7 dias (fica só no seu PC) ---
+    public class Amostra
+    {
+        public long T { get; set; }       // DateTime.Ticks, hora local
+        public int Semana { get; set; }   // % do limite semanal naquele momento
+    }
+
+    static class Historico
+    {
+        static List<Amostra> amostras;
+        static string Arquivo { get { return System.IO.Path.Combine(Config.Pasta, "historico.json"); } }
+
+        static void Carregar()
+        {
+            if (amostras != null) return;
+            try { amostras = new JavaScriptSerializer().Deserialize<List<Amostra>>(File.ReadAllText(Arquivo)); } catch { }
+            if (amostras == null) amostras = new List<Amostra>();
+        }
+
+        public static void Adicionar(int semana)
+        {
+            Carregar();
+            var agora = DateTime.Now;
+            var ultima = amostras.Count > 0 ? amostras[amostras.Count - 1] : null;
+            // guarda quando muda, ou a cada meia hora, para o arquivo não crescer à toa
+            if (ultima != null && ultima.Semana == semana && agora.Ticks - ultima.T < TimeSpan.FromMinutes(30).Ticks) return;
+            amostras.Add(new Amostra { T = agora.Ticks, Semana = semana });
+            long limite = agora.AddDays(-9).Ticks;
+            amostras.RemoveAll(a => a.T < limite);
+            try
+            {
+                Directory.CreateDirectory(Config.Pasta);
+                File.WriteAllText(Arquivo, new JavaScriptSerializer().Serialize(amostras));
+            }
+            catch { }
+        }
+
+        // Quantos pontos do limite semanal foram gastos em cada um dos últimos dias (o último é hoje).
+        // Só conta as subidas de uma leitura para a seguinte; quando o limite renova, o número cai e isso não conta.
+        public static double[] PorDia(int dias, out bool temDados)
+        {
+            Carregar();
+            var resultado = new double[dias];
+            var hoje = DateTime.Today;
+            temDados = amostras.Count >= 2;
+            for (int i = 1; i < amostras.Count; i++)
+            {
+                int subida = amostras[i].Semana - amostras[i - 1].Semana;
+                if (subida <= 0) continue;
+                int indice = dias - 1 - (int)(hoje - new DateTime(amostras[i].T).Date).TotalDays;
+                if (indice >= 0 && indice < dias) resultado[indice] += subida;
+            }
+            return resultado;
         }
     }
 
@@ -329,7 +474,23 @@ namespace ClaudeWidget
                 new[] { "#22C55E", "M8,-4 H24 V-2 H8 Z" } } },
             new Chapeu { Id = "natal", Nome = "Natal", Partes = new[] {
                 new[] { "#DC2626", "M6,-6 H24 V-2 H6 Z M12,-8 H26 V-6 H12 Z" }, new[] { "#F5F5F5", "M4,-2 H28 V0 H4 Z M26,-10 H30 V-6 H26 Z" } } },
+            new Chapeu { Id = "abobora", Nome = "Abóbora", Partes = new[] {
+                new[] { "#F97316", "M8,-8 H24 V0 H8 Z M6,-6 H8 V-2 H6 Z M24,-6 H26 V-2 H24 Z" }, new[] { "#C2410C", "M12,-8 h1 v8 h-1 Z M19,-8 h1 v8 h-1 Z" },
+                new[] { "#15803D", "M15,-11 h2 v3 h-2 Z" }, new[] { "#1F1F1F", "M10,-6 h2 v2 h-2 Z M20,-6 h2 v2 h-2 Z M13,-3 h6 v1 h-6 Z" } } },
+            new Chapeu { Id = "palha", Nome = "Palha (festa junina)", Partes = new[] {
+                new[] { "#EAB308", "M0,-2 H32 V0 H0 Z" }, new[] { "#CA8A04", "M8,-8 H24 V-2 H8 Z" }, new[] { "#DC2626", "M8,-4 H24 V-3 H8 Z" },
+                new[] { "#2563EB", "M18,-7 h3 v2 h-3 Z" } } },
         };
+
+        // Chapéu automático da época do ano (null fora delas)
+        public static string ChapeuDaEstacao(DateTime d)
+        {
+            if (d.Month == 12) return "natal";
+            if ((d.Month == 10 && d.Day >= 20) || (d.Month == 11 && d.Day <= 2)) return "abobora";
+            if (d.Month == 6 || (d.Month == 7 && d.Day <= 15)) return "palha";
+            if (d.Month == 1 && d.Day <= 6) return "festa";
+            return null;
+        }
 
         static Peca P(string cor, string desenho, string camada = "frente", string quadro = "", double traco = 0)
         {
@@ -370,6 +531,25 @@ namespace ClaudeWidget
                 P("#FACC15", "M40,14 H45 V19 H40 Z", "frente", "MA"),
                 P("#F97316", "M32,14 H38 V19 H32 Z", "frente", "MB"),
                 P("#FACC15", "M38,15 H42 V18 H38 Z", "frente", "MB") } },
+            new Transporte { Id = "patinete", Nome = "Patinete", Velocidade = 8, Parada = 12, Pernas = "paradas", Pecas = new[] {
+                P("#4B5563", "M-2,20 H30 V22 H-2 Z", "atras"),
+                P("#9CA3AF", "M-4,2 h2 v19 h-2 Z", "atras"),
+                P("#1F2937", "M-7,2 h8 v2 h-8 Z", "atras"),
+                P("#111827", "M-5,21 h4 v4 h-4 Z M25,21 h4 v4 h-4 Z", "atras"),
+                P("#9CA3AF", "M36,6 h6 v1 h-6 Z M38,12 h6 v1 h-6 Z", "atras", "MA"),
+                P("#9CA3AF", "M35,9 h6 v1 h-6 Z M37,15 h5 v1 h-5 Z", "atras", "MB") } },
+            new Transporte { Id = "disco", Nome = "Disco voador", Velocidade = 9, Parada = 12, AssentoY = -4, Pernas = "encolhidas", Balanca = true, Pecas = new[] {
+                P("#6693C5FD", "M2,-6 H30 V12 H2 Z", "atras"),
+                P("#9CA3AF", "M-8,12 H40 V16 H-8 Z"),
+                P("#6B7280", "M-4,16 H36 V19 H-4 Z"),
+                P("#4B5563", "M4,19 H28 V21 H4 Z"),
+                P("#FACC15", "M-4,13 h2 v2 h-2 Z M8,13 h2 v2 h-2 Z M22,13 h2 v2 h-2 Z M34,13 h2 v2 h-2 Z", "frente", "A"),
+                P("#22C55E", "M2,13 h2 v2 h-2 Z M15,13 h2 v2 h-2 Z M28,13 h2 v2 h-2 Z", "frente", "B") } },
+            new Transporte { Id = "tapete", Nome = "Tapete mágico", Velocidade = 7, Parada = 10, AssentoY = -2, Pernas = "encolhidas", Balanca = true, Pecas = new[] {
+                P("#7C3AED", "M-6,17 H38 V21 H-6 Z"),
+                P("#FACC15", "M-6,16 H38 V17 H-6 Z M-6,21 H38 V22 H-6 Z M-9,18 h3 v1 h-3 Z M-9,20 h3 v1 h-3 Z M38,18 h3 v1 h-3 Z M38,20 h3 v1 h-3 Z"),
+                P("#F472B6", "M0,18 h2 v2 h-2 Z M12,18 h2 v2 h-2 Z M24,18 h2 v2 h-2 Z", "frente", "A"),
+                P("#F472B6", "M6,18 h2 v2 h-2 Z M18,18 h2 v2 h-2 Z M30,18 h2 v2 h-2 Z", "frente", "B") } },
         };
 
         public static Transporte AcharTransporte(string id)
@@ -416,12 +596,115 @@ namespace ClaudeWidget
             var dancar = new Roteiro();
             for (int i = 0; i < 3; i++) dancar.Q(x: -2, y: -2, olhar: -2, pe: "T").Q(x: -2, pe: "A", n: 2).Q(x: 2, y: -2, olhar: 2, pe: "T").Q(x: 2, pe: "B", n: 2);
             s["dancar"] = dancar.Q();
+            // cansado perto do limite: respira rápido, de olhos meio fechados
+            s["ofegar"] = new Roteiro().Q(y: -1).Q().Q(y: -1).Q().Q(y: -1).Q().Q(fechado: true).Q().Q(y: -1).Q();
+            // quando o limite renova: três pulos altos e uma dancinha
+            var festa = new Roteiro();
+            for (int i = 0; i < 3; i++) festa.Q(y: -1).Q(y: -4, pe: "T", fechado: true, n: 2).Q(y: -1).Q();
+            festa.AddRange(dancar);
+            s["festa"] = festa;
             return s;
         }
 
-        // Peso de cada movimento no sorteio (soma 100); sempre emenda um no outro
+        // Peso de cada movimento no sorteio (soma 100); sempre emenda um no outro. Cansado, ele se mexe menos.
         public static readonly string[] Movimentos = { "andar", "respirar", "olhar", "pular", "dancar", "piscar" };
         public static readonly int[] Pesos = { 30, 25, 15, 10, 10, 10 };
+        public static readonly string[] MovimentosCansado = { "ofegar", "respirar", "olhar", "piscar" };
+        public static readonly int[] PesosCansado = { 40, 30, 10, 20 };
+
+        // Cores do balão e do menu: escuro e claro, seguindo o tema do Windows
+        public static readonly Dictionary<string, string[]> Tema = new Dictionary<string, string[]>
+        {
+            { "Fundo", new[] { "#2B2B2B", "#F9F9F9" } },
+            { "Borda", new[] { "#454545", "#D9D9D9" } },
+            { "Texto", new[] { "#F3F3F3", "#1A1A1A" } },
+            { "Texto2", new[] { "#D6D6D6", "#3B3B3B" } },
+            { "Texto3", new[] { "#9A9A9A", "#6B6B6B" } },
+            { "Texto4", new[] { "#7A7A7A", "#8A8A8A" } },
+            { "Trilho", new[] { "#40FFFFFF", "#1F000000" } },
+            { "MenuFundo", new[] { "#2C2C2C", "#F9F9F9" } },
+            { "MenuBorda", new[] { "#3F3F3F", "#DADADA" } },
+            { "MenuDestaque", new[] { "#3D3D3D", "#EAEAEA" } },
+            { "MenuApagado", new[] { "#9A9A9A", "#8A8A8A" } },
+        };
+
+        // Menu no estilo do Windows 11 (o padrão do WPF é o clássico cinza), com as cores do tema acima
+        public const string XamlEstilos = @"
+<ResourceDictionary xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>
+  <Style TargetType='ContextMenu'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='HasDropShadow' Value='False'/>
+    <Setter Property='Foreground' Value='{DynamicResource Texto}'/>
+    <Setter Property='FontFamily' Value='Segoe UI Variable Text, Segoe UI'/>
+    <Setter Property='FontSize' Value='12'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='ContextMenu'>
+          <Grid Margin='0,0,10,10'>
+            <Border Background='{DynamicResource MenuFundo}' CornerRadius='8'>
+              <Border.Effect><DropShadowEffect BlurRadius='12' ShadowDepth='3' Opacity='0.35' Color='Black'/></Border.Effect>
+            </Border>
+            <Border Background='{DynamicResource MenuFundo}' BorderBrush='{DynamicResource MenuBorda}' BorderThickness='1' CornerRadius='8' Padding='0,4'>
+              <ItemsPresenter/>
+            </Border>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType='MenuItem'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='Foreground' Value='{DynamicResource Texto}'/>
+    <Setter Property='FontFamily' Value='Segoe UI Variable Text, Segoe UI'/>
+    <Setter Property='FontSize' Value='12'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='MenuItem'>
+          <Border x:Name='Bd' Background='Transparent' CornerRadius='4' Margin='4,1' Padding='6,4,10,4' SnapsToDevicePixels='True'>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width='22'/>
+                <ColumnDefinition Width='*'/>
+                <ColumnDefinition Width='Auto'/>
+              </Grid.ColumnDefinitions>
+              <TextBlock x:Name='Marca' Text='&#xE73E;' FontFamily='Segoe Fluent Icons, Segoe MDL2 Assets' FontSize='11'
+                         Foreground='#D77757' VerticalAlignment='Center' Visibility='Hidden'/>
+              <ContentPresenter Grid.Column='1' ContentSource='Header' RecognizesAccessKey='False' VerticalAlignment='Center'/>
+              <TextBlock x:Name='Seta' Grid.Column='2' Text='&#xE76C;' FontFamily='Segoe Fluent Icons, Segoe MDL2 Assets' FontSize='9'
+                         Margin='18,0,0,0' VerticalAlignment='Center' Visibility='Collapsed'/>
+              <Popup x:Name='PART_Popup' Placement='Right' HorizontalOffset='14' VerticalOffset='-8' AllowsTransparency='True'
+                     Focusable='False' PopupAnimation='None'
+                     IsOpen='{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}'>
+                <Grid Margin='0,0,10,10'>
+                  <Border Background='{DynamicResource MenuFundo}' CornerRadius='8'>
+                    <Border.Effect><DropShadowEffect BlurRadius='12' ShadowDepth='3' Opacity='0.35' Color='Black'/></Border.Effect>
+                  </Border>
+                  <Border Background='{DynamicResource MenuFundo}' BorderBrush='{DynamicResource MenuBorda}' BorderThickness='1' CornerRadius='8' Padding='0,4'>
+                    <ItemsPresenter/>
+                  </Border>
+                </Grid>
+              </Popup>
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Bd' Property='Background' Value='{DynamicResource MenuDestaque}'/></Trigger>
+            <Trigger Property='IsChecked' Value='True'><Setter TargetName='Marca' Property='Visibility' Value='Visible'/></Trigger>
+            <Trigger Property='HasItems' Value='True'><Setter TargetName='Seta' Property='Visibility' Value='Visible'/></Trigger>
+            <Trigger Property='IsEnabled' Value='False'><Setter Property='Foreground' Value='{DynamicResource MenuApagado}'/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style x:Key='{x:Static MenuItem.SeparatorStyleKey}' TargetType='Separator'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='Separator'><Border Height='1' Background='{DynamicResource MenuBorda}' Margin='10,4'/></ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+</ResourceDictionary>";
 
         // Mascote: o mesmo desenho em blocos da tela de boas-vindas do Claude Code (pixel 2x4)
         public static string XamlBoneco(string p)
@@ -441,6 +724,7 @@ namespace ClaudeWidget
     <Rectangle x:Name='§OlhoE' Canvas.Left='8' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
     <Rectangle x:Name='§OlhoD' Canvas.Left='22' Canvas.Top='4' Width='2' Height='4' Fill='#141413'/>
     <Path x:Name='§Oculos' Fill='#0F0F0F' Visibility='Collapsed' Data='M6,3 h6 v5 h-6 Z M20,3 h6 v5 h-6 Z M12,4 h8 v2 h-8 Z'/>
+    <Path x:Name='§Suor' Fill='#7DD3FC' Visibility='Collapsed' Data='M30,-1 h2 v1 h-2 Z M29,0 h4 v3 h-4 Z M30,3 h2 v1 h-2 Z'/>
     <Canvas x:Name='§Chapeu'/>
   </Canvas>
   <Canvas x:Name='§Frente'/>
@@ -451,6 +735,7 @@ namespace ClaudeWidget
 <Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
         WindowStyle='None' AllowsTransparency='True' Background='Transparent' Topmost='True' ShowInTaskbar='False'
         ShowActivated='False' Focusable='False' ResizeMode='NoResize' SizeToContent='WidthAndHeight' UseLayoutRounding='True'>
+  <Grid>
   <StackPanel Orientation='Horizontal' Margin='0,6,0,0'>
     <Border x:Name='Fundo' CornerRadius='5' Height='40' Padding='8,0,8,0' Cursor='Hand'>
       <Border.Style>
@@ -473,6 +758,8 @@ namespace ClaudeWidget
     </Border>
     <Canvas Width='56' Height='46' Margin='0,-6,0,0' ClipToBounds='True' IsHitTestVisible='False' SnapsToDevicePixels='True'>§V§</Canvas>
   </StackPanel>
+  <Canvas x:Name='Festa' IsHitTestVisible='False'/>
+  </Grid>
 </Window>";
 
         // Balão com o uso: janela própria que fica acima dos widgets e deixa o mouse passar
@@ -482,32 +769,38 @@ namespace ClaudeWidget
         ShowActivated='False' Focusable='False' IsHitTestVisible='False' ResizeMode='NoResize' SizeToContent='WidthAndHeight'
         UseLayoutRounding='True' FontFamily='Segoe UI Variable Text, Segoe UI'>
   <Grid Margin='8'>
-    <Grid.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Opacity='0.5' Color='Black'/></Grid.Effect>
+    <Grid.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Opacity='0.4' Color='Black'/></Grid.Effect>
     <StackPanel>
-      <Border Background='#2B2B2B' BorderBrush='#454545' BorderThickness='1' CornerRadius='8' Padding='12,10,12,10' Width='232'>
+      <Border Background='{DynamicResource Fundo}' BorderBrush='{DynamicResource Borda}' BorderThickness='1' CornerRadius='8' Padding='12,10,12,10' Width='232'>
         <StackPanel>
-          <TextBlock Text='Uso do Claude' Foreground='#F3F3F3' FontSize='13' FontWeight='SemiBold'/>
+          <TextBlock Text='Uso do Claude' Foreground='{DynamicResource Texto}' FontSize='13' FontWeight='SemiBold'/>
           <Grid Margin='0,10,0,0'>
-            <TextBlock Text='Sessão (5h)' Foreground='#D6D6D6' FontSize='12'/>
-            <TextBlock x:Name='PctSessao' HorizontalAlignment='Right' Foreground='#F3F3F3' FontSize='12' FontWeight='SemiBold'/>
+            <TextBlock Text='Sessão (5h)' Foreground='{DynamicResource Texto2}' FontSize='12'/>
+            <TextBlock x:Name='PctSessao' HorizontalAlignment='Right' Foreground='{DynamicResource Texto}' FontSize='12' FontWeight='SemiBold'/>
           </Grid>
-          <Border Height='4' CornerRadius='2' Background='#40FFFFFF' Margin='0,5,0,0'>
+          <Border Height='4' CornerRadius='2' Background='{DynamicResource Trilho}' Margin='0,5,0,0'>
             <Border x:Name='BarraSessao' HorizontalAlignment='Left' CornerRadius='2' Width='0'/>
           </Border>
-          <TextBlock x:Name='RenovaSessao' Foreground='#9A9A9A' FontSize='11' Margin='0,4,0,0'/>
+          <TextBlock x:Name='RenovaSessao' Foreground='{DynamicResource Texto3}' FontSize='11' Margin='0,4,0,0'/>
           <Grid Margin='0,10,0,0'>
-            <TextBlock Text='Semanal' Foreground='#D6D6D6' FontSize='12'/>
-            <TextBlock x:Name='PctSemana' HorizontalAlignment='Right' Foreground='#F3F3F3' FontSize='12' FontWeight='SemiBold'/>
+            <TextBlock Text='Semanal' Foreground='{DynamicResource Texto2}' FontSize='12'/>
+            <TextBlock x:Name='PctSemana' HorizontalAlignment='Right' Foreground='{DynamicResource Texto}' FontSize='12' FontWeight='SemiBold'/>
           </Grid>
-          <Border Height='4' CornerRadius='2' Background='#40FFFFFF' Margin='0,5,0,0'>
+          <Border Height='4' CornerRadius='2' Background='{DynamicResource Trilho}' Margin='0,5,0,0'>
             <Border x:Name='BarraSemana' HorizontalAlignment='Left' CornerRadius='2' Width='0'/>
           </Border>
-          <TextBlock x:Name='RenovaSemana' Foreground='#9A9A9A' FontSize='11' Margin='0,4,0,0'/>
-          <TextBlock x:Name='Rodape' Foreground='#9A9A9A' FontSize='11' Margin='0,10,0,0' TextWrapping='Wrap'/>
-          <TextBlock Text='Anel: atualizar · Bonequinho: personalizar' Foreground='#7A7A7A' FontSize='10.5' Margin='0,2,0,0'/>
+          <TextBlock x:Name='RenovaSemana' Foreground='{DynamicResource Texto3}' FontSize='11' Margin='0,4,0,0'/>
+          <StackPanel x:Name='Extras'/>
+          <TextBlock Text='Últimos 7 dias (% do limite semanal)' Foreground='{DynamicResource Texto2}' FontSize='12' Margin='0,12,0,2'/>
+          <Canvas x:Name='Grafico' Width='206' Height='58' HorizontalAlignment='Left'/>
+          <TextBlock x:Name='SemDados' Text='O gráfico vai enchendo conforme o widget acompanha o seu uso.' Foreground='{DynamicResource Texto3}'
+                     FontSize='10.5' TextWrapping='Wrap' Visibility='Collapsed'/>
+          <TextBlock x:Name='Rodape' Foreground='{DynamicResource Texto3}' FontSize='11' Margin='0,10,0,0' TextWrapping='Wrap'/>
+          <TextBlock x:Name='NovaVersao' Foreground='#D77757' FontSize='11' FontWeight='SemiBold' Margin='0,4,0,0' TextWrapping='Wrap' Visibility='Collapsed'/>
+          <TextBlock Text='Anel: atualizar · Bonequinho: personalizar' Foreground='{DynamicResource Texto4}' FontSize='10.5' Margin='0,2,0,0'/>
         </StackPanel>
       </Border>
-      <Path x:Name='Bico' Data='M0,0 L8,8 L16,0' Fill='#2B2B2B' Stroke='#454545' StrokeThickness='1' HorizontalAlignment='Left' Margin='24,-1,0,0'/>
+      <Path x:Name='Bico' Data='M0,0 L8,8 L16,0' Fill='{DynamicResource Fundo}' Stroke='{DynamicResource Borda}' StrokeThickness='1' HorizontalAlignment='Left' Margin='24,-1,0,0'/>
     </StackPanel>
   </Grid>
 </Window>";
@@ -519,8 +812,9 @@ namespace ClaudeWidget
         public Canvas Raiz, Chapeu, Atras, Frente;
         public TranslateTransform Pulo, Assento;
         public ScaleTransform Espelho;
-        public Shapes.Path Corpo, Pernas, Oculos;
+        public Shapes.Path Corpo, Pernas, Oculos, Suor;
         public Shapes.Rectangle OlhoE, OlhoD;
+        bool cansado;  // perto do limite: olhos meio fechados e uma gota de suor
         string ultimo = "", transporte = "";
         readonly List<KeyValuePair<Shapes.Path, string>> pecas = new List<KeyValuePair<Shapes.Path, string>>();
 
@@ -536,6 +830,7 @@ namespace ClaudeWidget
             Corpo = (Shapes.Path)escopo.FindName(p + "Corpo");
             Pernas = (Shapes.Path)escopo.FindName(p + "Pernas");
             Oculos = (Shapes.Path)escopo.FindName(p + "Oculos");
+            Suor = (Shapes.Path)escopo.FindName(p + "Suor");
             OlhoE = (Shapes.Rectangle)escopo.FindName(p + "OlhoE");
             OlhoD = (Shapes.Rectangle)escopo.FindName(p + "OlhoD");
             Chapeu = (Canvas)escopo.FindName(p + "Chapeu");
@@ -543,13 +838,13 @@ namespace ClaudeWidget
 
         public void Aplicar(Quadro q)
         {
-            var chave = q.Chave();
+            var chave = q.Chave() + "|" + cansado;
             if (chave == ultimo) return;
             ultimo = chave;
             Pulo.X = q.X;
             Pulo.Y = q.Y;
             Pernas.Data = Arte.Pernas[q.Pe];
-            double altura = q.Fechado ? 1 : 4, topo = q.Fechado ? 6 : 4;
+            double altura = q.Fechado ? 1 : cansado ? 2 : 4, topo = q.Fechado || cansado ? 6 : 4;
             Canvas.SetLeft(OlhoE, 8 + q.Olhar); Canvas.SetTop(OlhoE, topo); OlhoE.Height = altura;
             Canvas.SetLeft(OlhoD, 22 + q.Olhar); Canvas.SetTop(OlhoD, topo); OlhoD.Height = altura;
         }
@@ -600,6 +895,18 @@ namespace ClaudeWidget
 
         // Vira para a direita (indo embora) ou volta para a esquerda
         public void Virar(bool paraDireita) { Espelho.ScaleX = paraDireita ? -1 : 1; }
+
+        public bool Cansado
+        {
+            get { return cansado; }
+            set
+            {
+                if (cansado == value) return;
+                cansado = value;
+                Suor.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+                ultimo = "";  // redesenha os olhos no próximo quadro
+            }
+        }
     }
 
     // Onde estão o Iniciar, os Widgets, os apps e a bandeja numa barra (via UI Automation)
@@ -620,6 +927,7 @@ namespace ClaudeWidget
         public Shapes.Path Arco;
         public TextBlock Texto;
         public Boneco Principal, Visitante;
+        public Canvas Festa;  // confete por cima de tudo, quando o limite renova
         public string Visita = "fora";
         public double VisitaX;
         public int Passo;
@@ -640,6 +948,13 @@ namespace ClaudeWidget
         public bool Movendo;
     }
 
+    class Confete
+    {
+        public Shapes.Rectangle Forma;
+        public Canvas Onde;
+        public double X, Y, VX, VY;
+    }
+
     class Controle
     {
         // Palco: área à direita do anel por onde o visitante chega; Fora: onde ele começa e termina, fora da vista
@@ -658,17 +973,28 @@ namespace ClaudeWidget
         readonly Win32.WinEventProc procFrente;
 
         Uso uso = new Uso();
-        bool buscando, claro, escondido;
+        bool buscando, claro, escondido, temLeitura;
         int pct;
-        string corAnel = Arte.Laranja, textoAnel = "…";
+        string corAnel = Arte.Laranja, textoAnel = "…", chapeuAtual;
         double fonteAnel = 10;
 
         Window balao;
         FrameworkElement cartao;
-        TextBlock pctSessao, pctSemana, renovaSessao, renovaSemana, rodape;
+        TextBlock pctSessao, pctSemana, renovaSessao, renovaSemana, rodape, semDados, textoNovaVersao;
         Border barraSessao, barraSemana;
+        StackPanel extras;
+        Canvas grafico;
         Shapes.Path bico;
         Widget donoBalao;
+
+        // versão nova no GitHub
+        const string Repositorio = "dev-lucccaslp/claude-widget";
+        string novaVersao, urlNovoExe, urlNovidades = "https://github.com/" + Repositorio + "/releases/latest";
+        bool baixando, balaoDeVersaoNova;
+        Forms.ToolStripMenuItem itemNovaVersao;
+
+        readonly List<Confete> confetes = new List<Confete>();
+        DispatcherTimer queda;
 
         ContextMenu menuAberto;
         IntPtr frenteAoAbrir;
@@ -684,6 +1010,11 @@ namespace ClaudeWidget
             this.app = app;
             try { escala = Win32.GetDpiForSystem() / 96.0; } catch { }
 
+            claro = TemaClaro();
+            AplicarTema();
+            // Trocou o tema do Windows: troca na hora
+            SystemEvents.UserPreferenceChanged += delegate { app.Dispatcher.BeginInvoke(new Action(ConferirTema)); };
+
             CriarBalao();
             CriarBandeja();
             // Se o "Iniciar com o Windows" aponta para um .exe antigo, passa a abrir o atual
@@ -691,7 +1022,20 @@ namespace ClaudeWidget
 
             animacao = NovoTimer(120, TicAnimacao);
             vigia = NovoTimer(300, Vigiar);
-            relogio = NovoTimer(IntervaloMinutos * 60000, AtualizarUso);
+            relogio = NovoTimer(IntervaloMinutos * 60000, delegate { AtualizarUso(); ConferirChapeuDaEstacao(); });
+            queda = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+            queda.Tick += delegate { CairConfete(); };
+
+            // Versão nova no GitHub: olha um minuto depois de abrir e depois a cada 12 horas.
+            // Também apaga o .exe antigo que ficou da última atualização.
+            var versao = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+            versao.Tick += delegate
+            {
+                versao.Interval = TimeSpan.FromHours(12);
+                VerificarVersao();
+                try { File.Delete(Programa.ExeInstalado + ".old"); } catch { }
+            };
+            versao.Start();
 
             // Quando a barra (ou qualquer janela) vem para a frente, reorganiza na hora, sem esperar o timer
             procFrente = delegate { Ordem.Elevar(); };
@@ -701,6 +1045,10 @@ namespace ClaudeWidget
             Vigiar();
             if (demo)
             {
+                // Comemora logo ao abrir, para ver o confete
+                var festa = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+                festa.Tick += delegate { festa.Stop(); Comemorar(); };
+                festa.Start();
                 // Passa por todos os transportes, um depois do outro, no primeiro widget (o balão é um só)
                 int proximo = 0;
                 DateTime parouEm = DateTime.MinValue;
@@ -759,7 +1107,7 @@ namespace ClaudeWidget
         // --- Uso ---
         void AtualizarUso()
         {
-            claro = TemaClaro();
+            ConferirTema();
             if (buscando) return;
             buscando = true;
             ThreadPool.QueueUserWorkItem(delegate
@@ -773,8 +1121,13 @@ namespace ClaudeWidget
         {
             if (novo.Erro == null)
             {
+                // O limite renovou (caiu 10 pontos ou mais desde a última leitura): festa!
+                bool renovou = temLeitura && (novo.Sessao + 10 <= uso.Sessao || novo.Semana + 10 <= uso.Semana);
                 uso = novo;
+                temLeitura = true;
+                Historico.Adicionar(novo.Semana);
                 relogio.Interval = TimeSpan.FromMinutes(IntervaloMinutos);
+                if (renovou) Comemorar();
             }
             else
             {
@@ -802,7 +1155,12 @@ namespace ClaudeWidget
                 textoAnel = "?";
                 fonteAnel = 12;
             }
-            foreach (var w in widgets.Values) MostrarEstado(w);
+            foreach (var w in widgets.Values)
+            {
+                MostrarEstado(w);
+                // Cansado perto do limite (do que o anel mostra)
+                w.Principal.Cansado = uso.Erro == null && pct >= 90;
+            }
             if (bandeja != null)
             {
                 var dica = uso.Erro != null ? "Claude Widget · " + uso.Erro : "Claude · 5h " + uso.Sessao + "% · semana " + uso.Semana + "%";
@@ -847,6 +1205,21 @@ namespace ClaudeWidget
             catch { return false; }
         }
 
+        // Balão e menu usam as cores de Arte.Tema pelo nome (DynamicResource); trocar aqui troca em tudo
+        void AplicarTema()
+        {
+            foreach (var cor in Arte.Tema) app.Resources[cor.Key] = Arte.Pincel(claro ? cor.Value[1] : cor.Value[0]);
+        }
+
+        void ConferirTema()
+        {
+            bool agora = TemaClaro();
+            if (agora == claro) return;
+            claro = agora;
+            AplicarTema();
+            MostrarUso();
+        }
+
         static void AbrirSite() { try { Process.Start("https://claude.ai/settings/usage"); } catch { } }
 
         // --- Balão ---
@@ -861,6 +1234,10 @@ namespace ClaudeWidget
             rodape = (TextBlock)balao.FindName("Rodape");
             barraSessao = (Border)balao.FindName("BarraSessao");
             barraSemana = (Border)balao.FindName("BarraSemana");
+            extras = (StackPanel)balao.FindName("Extras");
+            grafico = (Canvas)balao.FindName("Grafico");
+            semDados = (TextBlock)balao.FindName("SemDados");
+            textoNovaVersao = (TextBlock)balao.FindName("NovaVersao");
             bico = (Shapes.Path)balao.FindName("Bico");
             var h = new WindowInteropHelper(balao).EnsureHandle();
             // fora do Alt+Tab, sem foco e transparente para o mouse
@@ -879,6 +1256,99 @@ namespace ClaudeWidget
             renovaSessao.Text = uso.RenovaSessao;
             renovaSemana.Text = uso.RenovaSemana;
             rodape.Text = uso.Hora;
+            PreencherExtras();
+            DesenharGrafico();
+            textoNovaVersao.Text = novaVersao == null ? "" : "Versão " + novaVersao + " disponível: atualize pelo ícone nos ícones ocultos";
+            textoNovaVersao.Visibility = novaVersao == null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        // Limites semanais por modelo e créditos extras, quando a conta tiver
+        void PreencherExtras()
+        {
+            extras.Children.Clear();
+            foreach (var m in uso.Modelos) AdicionarLimite("Semanal · " + m[0], int.Parse(m[1]), m[2]);
+            if (uso.Creditos != null)
+            {
+                var texto = new TextBlock { Text = uso.Creditos, FontSize = 12, Margin = new Thickness(0, 10, 0, 0), TextWrapping = TextWrapping.Wrap };
+                texto.SetResourceReference(TextBlock.ForegroundProperty, "Texto2");
+                extras.Children.Add(texto);
+                if (uso.CreditosPct >= 0) extras.Children.Add(Barra(uso.CreditosPct));
+            }
+            extras.Visibility = extras.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        void AdicionarLimite(string titulo, double valor, string renova)
+        {
+            var linha = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+            var nome = new TextBlock { Text = titulo, FontSize = 12 };
+            nome.SetResourceReference(TextBlock.ForegroundProperty, "Texto2");
+            var numero = new TextBlock { Text = valor + "%", FontSize = 12, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right };
+            numero.SetResourceReference(TextBlock.ForegroundProperty, "Texto");
+            linha.Children.Add(nome);
+            linha.Children.Add(numero);
+            extras.Children.Add(linha);
+            extras.Children.Add(Barra(valor));
+            if (string.IsNullOrEmpty(renova)) return;
+            var quando = new TextBlock { Text = renova, FontSize = 11, Margin = new Thickness(0, 4, 0, 0) };
+            quando.SetResourceReference(TextBlock.ForegroundProperty, "Texto3");
+            extras.Children.Add(quando);
+        }
+
+        static FrameworkElement Barra(double valor)
+        {
+            var fundo = new Border { Height = 4, CornerRadius = new CornerRadius(2), Margin = new Thickness(0, 5, 0, 0) };
+            fundo.SetResourceReference(Border.BackgroundProperty, "Trilho");
+            fundo.Child = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                CornerRadius = new CornerRadius(2),
+                Width = LarguraBarra * Math.Min(100, Math.Max(0, valor)) / 100.0,
+                Background = Arte.Pincel(Arte.CorDoUso(valor)),
+            };
+            return fundo;
+        }
+
+        // Uma barra por dia: quanto do limite semanal foi gasto naquele dia (hoje é a última, mais forte)
+        void DesenharGrafico()
+        {
+            grafico.Children.Clear();
+            bool temDados;
+            var dias = Historico.PorDia(7, out temDados);
+            double maior = Math.Max(10, dias.Max());
+            const double alturaBarras = 30, topo = 12;
+            double passo = LarguraBarra / 7, largura = passo - 8;
+            var ptBR = new CultureInfo("pt-BR");
+            for (int i = 0; i < 7; i++)
+            {
+                bool hoje = i == 6;
+                double altura = dias[i] <= 0 ? 2 : Math.Max(3, alturaBarras * dias[i] / maior);
+                var barra = new Border { Width = largura, Height = altura, CornerRadius = new CornerRadius(2) };
+                if (dias[i] <= 0) barra.SetResourceReference(Border.BackgroundProperty, "Trilho");
+                else barra.Background = Arte.Pincel(hoje ? Arte.Laranja : "#99D77757");
+                Canvas.SetLeft(barra, i * passo + 4);
+                Canvas.SetTop(barra, topo + alturaBarras - altura);
+                grafico.Children.Add(barra);
+                if (dias[i] > 0)
+                {
+                    var valor = new TextBlock { Text = Math.Round(dias[i]) + "%", FontSize = 9, Width = passo, TextAlignment = TextAlignment.Center };
+                    valor.SetResourceReference(TextBlock.ForegroundProperty, "Texto3");
+                    Canvas.SetLeft(valor, i * passo);
+                    Canvas.SetTop(valor, topo + alturaBarras - altura - 12);
+                    grafico.Children.Add(valor);
+                }
+                var dia = DateTime.Today.AddDays(i - 6);
+                var rotulo = new TextBlock
+                {
+                    Text = hoje ? "hoje" : ptBR.DateTimeFormat.GetAbbreviatedDayName(dia.DayOfWeek).TrimEnd('.'),
+                    FontSize = 10, Width = passo, TextAlignment = TextAlignment.Center,
+                    FontWeight = hoje ? FontWeights.SemiBold : FontWeights.Normal,
+                };
+                rotulo.SetResourceReference(TextBlock.ForegroundProperty, hoje ? "Texto" : "Texto3");
+                Canvas.SetLeft(rotulo, i * passo);
+                Canvas.SetTop(rotulo, topo + alturaBarras + 2);
+                grafico.Children.Add(rotulo);
+            }
+            semDados.Visibility = temDados ? Visibility.Collapsed : Visibility.Visible;
         }
 
         // O bico aponta para o visitante (ou para o anel, se o visitante estiver desligado); o balão não sai da tela
@@ -912,6 +1382,9 @@ namespace ClaudeWidget
             AtualizarIconeBandeja();
             var menu = new Forms.ContextMenuStrip();
             menu.Items.Add(new Forms.ToolStripMenuItem("Claude Widget " + VersaoCurta) { Enabled = false });
+            itemNovaVersao = new Forms.ToolStripMenuItem("Atualizar") { Visible = false, Font = new Drawing.Font(menu.Font, Drawing.FontStyle.Bold) };
+            itemNovaVersao.Click += delegate { AtualizarVersao(); };
+            menu.Items.Add(itemNovaVersao);
             menu.Items.Add(new Forms.ToolStripSeparator());
             var itemMostrar = new Forms.ToolStripMenuItem("Esconder widget");
             itemMostrar.Click += delegate { Esconder(!escondido); };
@@ -931,12 +1404,24 @@ namespace ClaudeWidget
             var itemWindows = new Forms.ToolStripMenuItem("Iniciar com o Windows");
             itemWindows.Click += delegate { IniciarComWindows(!IniciaComWindows()); };
             menu.Items.Add(itemWindows);
+            var itemAvisar = new Forms.ToolStripMenuItem("Avisar quando sair versão nova");
+            itemAvisar.Click += delegate
+            {
+                config.AvisarVersaoNova = !config.AvisarVersaoNova;
+                config.Salvar();
+                if (config.AvisarVersaoNova) VerificarVersao();
+            };
+            menu.Items.Add(itemAvisar);
+            menu.Items.Add("Ver novidades", null, delegate { try { Process.Start(urlNovidades); } catch { } });
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add("Sair", null, delegate { Sair(); });
+            bandeja.BalloonTipClicked += delegate { if (balaoDeVersaoNova) AtualizarVersao(); };
+            bandeja.BalloonTipClosed += delegate { balaoDeVersaoNova = false; };
             menu.Opening += delegate
             {
                 itemMostrar.Text = escondido ? "Mostrar widget" : "Esconder widget";
                 itemWindows.Checked = IniciaComWindows();
+                itemAvisar.Checked = config.AvisarVersaoNova;
                 for (int i = 0; i < anel.DropDownItems.Count; i++)
                     ((Forms.ToolStripMenuItem)anel.DropDownItems[i]).Checked = config.Mostrar == OpcoesDoAnel[i][1];
             };
@@ -1003,8 +1488,128 @@ namespace ClaudeWidget
         public void AvisarAtualizacao()
         {
             if (bandeja == null) return;
+            balaoDeVersaoNova = false;
             bandeja.ShowBalloonTip(6000, "Claude Widget " + VersaoCurta,
                 "Atualizado! Clique no mascote para ver as opções novas.", Forms.ToolTipIcon.Info);
+        }
+
+        // --- Versão nova no GitHub ---
+        bool atualizarSozinho;  // --atualizar: se achar versão nova, já baixa e troca
+
+        public void AtualizarAgora()
+        {
+            atualizarSozinho = true;
+            if (urlNovoExe != null) AtualizarVersao();
+            else VerificarVersao(true);
+        }
+
+        void VerificarVersao(bool forcar = false)
+        {
+            if (!config.AvisarVersaoNova && !forcar) return;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var req = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repositorio + "/releases/latest");
+                    req.UserAgent = "claude-widget";
+                    req.Accept = "application/vnd.github+json";
+                    req.Timeout = 15000;
+                    string json;
+                    using (var resp = req.GetResponse())
+                    using (var leitor = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                        json = leitor.ReadToEnd();
+                    var r = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+                    var tag = (r["tag_name"] as string ?? "").TrimStart('v', 'V');
+                    Version versao;
+                    if (!Version.TryParse(tag, out versao)) return;
+                    var atual = Programa.Versao;
+                    if (versao <= new Version(atual.Major, atual.Minor, atual.Build)) return;
+                    string url = null;
+                    var arquivos = r["assets"] as System.Collections.IEnumerable;
+                    if (arquivos != null)
+                        foreach (var a in arquivos)
+                        {
+                            var d = a as Dictionary<string, object>;
+                            if (d != null && (d["name"] as string) == "ClaudeWidget.exe") url = d["browser_download_url"] as string;
+                        }
+                    var pagina = r["html_url"] as string;
+                    if (url == null) return;
+                    app.Dispatcher.BeginInvoke(new Action(delegate { VersaoNovaDisponivel(tag, url, pagina); }));
+                }
+                catch { }
+            });
+        }
+
+        void VersaoNovaDisponivel(string versao, string url, string pagina)
+        {
+            novaVersao = versao;
+            urlNovoExe = url;
+            if (pagina != null) urlNovidades = pagina;
+            itemNovaVersao.Text = "Atualizar para a versão " + versao;
+            itemNovaVersao.Visible = true;
+            if (donoBalao != null) MostrarBalao(donoBalao);
+            if (atualizarSozinho) { AtualizarVersao(); return; }
+            if (config.VersaoAvisada == versao) return;  // avisa de cada versão uma vez só
+            config.VersaoAvisada = versao;
+            config.Salvar();
+            balaoDeVersaoNova = true;
+            bandeja.ShowBalloonTip(10000, "Claude Widget " + versao + " disponível",
+                "Clique aqui para atualizar (ou depois, pelo ícone nos ícones ocultos).", Forms.ToolTipIcon.Info);
+        }
+
+        // Baixa o .exe novo da Release, confere que é ele mesmo, troca e abre; a versão nova fecha esta e assume o lugar
+        void AtualizarVersao()
+        {
+            if (urlNovoExe == null || baixando) return;
+            baixando = true;
+            balaoDeVersaoNova = false;
+            bandeja.ShowBalloonTip(4000, "Claude Widget", "Baixando a versão " + novaVersao + "…", Forms.ToolTipIcon.Info);
+            var url = urlNovoExe;
+            var versao = novaVersao;
+            var baixado = Programa.ExeInstalado + ".baixando";
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string erro = null;
+                try
+                {
+                    Directory.CreateDirectory(Config.Pasta);
+                    using (var cliente = new WebClient())
+                    {
+                        cliente.Headers[HttpRequestHeader.UserAgent] = "claude-widget";
+                        cliente.DownloadFile(url, baixado);
+                    }
+                    var info = FileVersionInfo.GetVersionInfo(baixado);
+                    if (info.ProductName != "Claude Widget" || info.FileVersion == null || !info.FileVersion.StartsWith(versao))
+                        throw new Exception("o arquivo baixado não é a versão esperada");
+                }
+                catch (Exception ex) { erro = ex.Message; }
+                app.Dispatcher.BeginInvoke(new Action(delegate { TrocarPelaNova(baixado, erro); }));
+            });
+        }
+
+        void TrocarPelaNova(string baixado, string erro)
+        {
+            baixando = false;
+            if (erro == null)
+            {
+                try
+                {
+                    var destino = Programa.ExeInstalado;
+                    var este = Assembly.GetExecutingAssembly().Location;
+                    var velho = destino + ".old";
+                    if (File.Exists(velho)) File.Delete(velho);
+                    // o .exe aberto não pode ser sobrescrito, mas pode ser renomeado
+                    if (string.Equals(System.IO.Path.GetFullPath(destino), System.IO.Path.GetFullPath(este), StringComparison.OrdinalIgnoreCase)) File.Move(destino, velho);
+                    else if (File.Exists(destino)) File.Delete(destino);
+                    File.Move(baixado, destino);
+                    Process.Start(destino);
+                    return;
+                }
+                catch (Exception ex) { erro = ex.Message; }
+            }
+            try { File.Delete(baixado); } catch { }
+            bandeja.ShowBalloonTip(8000, "Não deu para atualizar", erro + ". Vou abrir a página para baixar à mão.", Forms.ToolTipIcon.Warning);
+            try { Process.Start(urlNovidades); } catch { }
         }
 
         static readonly string[][] OpcoesDoAnel = { new[] { "O maior dos dois", "maior" }, new[] { "Sessão (5h)", "sessao" }, new[] { "Semanal", "semanal" } };
@@ -1041,15 +1646,84 @@ namespace ClaudeWidget
             Animar("pular");
         }
 
+        // Na época do Natal, Halloween, festa junina e Ano-Novo, o chapéu da estação ganha do escolhido
+        string ChapeuEfetivo()
+        {
+            var estacao = config.ChapeuEstacao ? Arte.ChapeuDaEstacao(DateTime.Today) : null;
+            return estacao ?? config.Chapeu;
+        }
+
         void EstiloDe(Widget w)
         {
-            w.Principal.Estilo(config.Cor, config.Chapeu, config.Oculos);
-            w.Visitante.Estilo(config.Cor, config.Chapeu, config.Oculos);
+            chapeuAtual = ChapeuEfetivo();
+            w.Principal.Estilo(config.Cor, chapeuAtual, config.Oculos);
+            w.Visitante.Estilo(config.Cor, chapeuAtual, config.Oculos);
+        }
+
+        // Virou o dia e entrou (ou saiu) uma estação: troca o chapéu
+        void ConferirChapeuDaEstacao()
+        {
+            if (ChapeuEfetivo() == chapeuAtual) return;
+            foreach (var w in widgets.Values) EstiloDe(w);
+            Animar("pular");
+        }
+
+        // --- Comemoração quando o limite renova: pulos, dancinha e confete ---
+        static readonly string[] CoresDoConfete = { "#F59E0B", "#EF4444", "#3B82F6", "#22C55E", "#A855F7", "#EC4899", "#FACC15" };
+
+        public void Comemorar()
+        {
+            if (!config.Movimento || !SystemParameters.ClientAreaAnimation) return;
+            Animar("festa");
+            foreach (var w in widgets.Values)
+            {
+                if (!w.Janela.IsVisible) continue;
+                // estoura de cima do mascote: sobe, abre para os lados e cai
+                for (int i = 0; i < 40; i++)
+                {
+                    var c = new Confete
+                    {
+                        Onde = w.Festa,
+                        X = 14 + sorteio.NextDouble() * 24,
+                        Y = 12 + sorteio.NextDouble() * 6,
+                        VX = (sorteio.NextDouble() - 0.5) * 3.2,
+                        VY = -1.2 - sorteio.NextDouble() * 1.6,
+                        Forma = new Shapes.Rectangle
+                        {
+                            Width = sorteio.Next(2) == 0 ? 2 : 3,
+                            Height = sorteio.Next(2) == 0 ? 3 : 2,
+                            Fill = Arte.Pincel(CoresDoConfete[sorteio.Next(CoresDoConfete.Length)]),
+                        },
+                    };
+                    w.Festa.Children.Add(c.Forma);
+                    confetes.Add(c);
+                }
+            }
+            if (confetes.Count > 0) { CairConfete(); queda.Start(); }
+        }
+
+        void CairConfete()
+        {
+            for (int i = confetes.Count - 1; i >= 0; i--)
+            {
+                var c = confetes[i];
+                c.X += c.VX;
+                c.Y += c.VY;
+                c.VX *= 0.985;
+                c.VY = Math.Min(c.VY + 0.07, 1.4);  // gravidade, com queda devagar como papel
+                if (c.Y > 48) { c.Onde.Children.Remove(c.Forma); confetes.RemoveAt(i); continue; }
+                Canvas.SetLeft(c.Forma, c.X);
+                Canvas.SetTop(c.Forma, c.Y);
+            }
+            if (confetes.Count == 0) queda.Stop();
         }
 
         void CriarMenu(Widget w)
         {
             var menu = new ContextMenu();
+            var atualizar = Opcao(menu, "", AtualizarVersao);
+            atualizar.FontWeight = FontWeights.SemiBold;
+            atualizar.Visibility = Visibility.Collapsed;
             w.MiSessao = Opcao(menu, "", info: true);
             w.MiSemana = Opcao(menu, "", info: true);
             w.MiHora = Opcao(menu, "", info: true);
@@ -1076,6 +1750,9 @@ namespace ClaudeWidget
                 var id = chapeu.Id;
                 Opcao(chapeus, chapeu.Nome, delegate { config.Chapeu = id; MudouEstilo(); }, () => config.Chapeu == id, w);
             }
+            chapeus.Items.Add(new Separator());
+            Opcao(chapeus, "Chapéu da estação (Natal, Halloween, festa junina, Ano-Novo)",
+                delegate { config.ChapeuEstacao = !config.ChapeuEstacao; MudouEstilo(); }, () => config.ChapeuEstacao, w);
             Opcao(menu, "Óculos escuros", delegate { config.Oculos = !config.Oculos; MudouEstilo(); }, () => config.Oculos, w);
 
             var posicao = Opcao(menu, "Posição neste monitor");
@@ -1101,6 +1778,8 @@ namespace ClaudeWidget
             menu.Opened += delegate
             {
                 foreach (var m in w.Marcas) m.Key.IsChecked = m.Value();
+                atualizar.Header = novaVersao == null ? "" : "Atualizar para a versão " + novaVersao;
+                atualizar.Visibility = novaVersao == null ? Visibility.Collapsed : Visibility.Visible;
                 Ordem.Pausado = true;
                 EsconderBalao(null);
                 PararVisita(w);
@@ -1156,6 +1835,7 @@ namespace ClaudeWidget
                 Texto = (TextBlock)janela.FindName("Texto"),
                 Principal = new Boneco(janela, "M"),
                 Visitante = new Boneco(janela, "V"),
+                Festa = (Canvas)janela.FindName("Festa"),
                 VisitaX = Fora,
             };
             // o palco começa 6 px acima do widget (espaço para chapéu, bicicleta e foguete)
@@ -1416,11 +2096,14 @@ namespace ClaudeWidget
 
         string Sortear()
         {
+            bool cansado = widgets.Values.Any(w => w.Principal.Cansado);
+            var movimentos = cansado ? Arte.MovimentosCansado : Arte.Movimentos;
+            var pesos = cansado ? Arte.PesosCansado : Arte.Pesos;
             int sorte = sorteio.Next(100);
-            for (int i = 0; i < Arte.Movimentos.Length; i++)
+            for (int i = 0; i < movimentos.Length; i++)
             {
-                sorte -= Arte.Pesos[i];
-                if (sorte < 0) return Arte.Movimentos[i];
+                sorte -= pesos[i];
+                if (sorte < 0) return movimentos[i];
             }
             return "respirar";
         }
@@ -1532,6 +2215,7 @@ namespace ClaudeWidget
         const string NomeMutex = @"Local\ClaudeWidget";
         const string EventoMostrar = @"Local\ClaudeWidget.Mostrar";
         const string EventoSair = @"Local\ClaudeWidget.Sair";
+        const string EventoAtualizar = @"Local\ClaudeWidget.Atualizar";
 
         public static Version Versao { get { return Assembly.GetExecutingAssembly().GetName().Version; } }
         static string EsteExe { get { return Assembly.GetExecutingAssembly().Location; } }
@@ -1583,14 +2267,15 @@ namespace ClaudeWidget
         [STAThread]
         static void Main(string[] args)
         {
-            bool sair = args.Contains("--sair"), demo = args.Contains("--demo");
+            bool sair = args.Contains("--sair"), demo = args.Contains("--demo"), atualizar = args.Contains("--atualizar");
             bool criou, atualizou = false;
             using (var mutex = new Mutex(true, NomeMutex, out criou))
             {
                 if (!criou)
                 {
                     if (sair) { Sinalizar(EventoSair); return; }
-                    if (!AbertaEhMaisVelha()) { Sinalizar(EventoMostrar); return; }  // mesma versão: só aparece de novo
+                    // mesma versão (ou mais nova): pede para a aberta aparecer de novo, ou para ela se atualizar
+                    if (!AbertaEhMaisVelha()) { Sinalizar(atualizar ? EventoAtualizar : EventoMostrar); return; }
                     // Esta versão é mais nova: pede para a aberta sair e assume o lugar dela
                     Sinalizar(EventoSair);
                     FecharVersaoPowerShell();
@@ -1613,7 +2298,11 @@ namespace ClaudeWidget
                 // Desenho pela CPU: as janelas são minúsculas, e pela placa de vídeo o driver reserva centenas de MB à toa
                 RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
+                // sobra da última atualização pelo ícone (o .exe antigo, renomeado)
+                try { File.Delete(ExeInstalado + ".old"); } catch { }
+
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(Arte.XamlEstilos));
                 // Um erro inesperado não derruba o widget: fica anotado em %LOCALAPPDATA%\ClaudeWidget\erros.log
                 app.DispatcherUnhandledException += (s, e) =>
                 {
@@ -1627,15 +2316,19 @@ namespace ClaudeWidget
                 };
                 var controle = new Controle(app, demo);
                 if (atualizou) controle.AvisarAtualizacao();
+                if (atualizar) controle.AtualizarAgora();
 
                 var mostrar = new EventWaitHandle(false, EventResetMode.AutoReset, EventoMostrar);
                 var fechar = new EventWaitHandle(false, EventResetMode.AutoReset, EventoSair);
+                var atualizarAgora = new EventWaitHandle(false, EventResetMode.AutoReset, EventoAtualizar);
                 var escuta = new Thread(delegate ()
                 {
-                    var eventos = new WaitHandle[] { mostrar, fechar };
+                    var eventos = new WaitHandle[] { mostrar, fechar, atualizarAgora };
                     while (true)
                     {
-                        if (WaitHandle.WaitAny(eventos) == 0) app.Dispatcher.BeginInvoke(new Action(controle.Mostrar));
+                        int qual = WaitHandle.WaitAny(eventos);
+                        if (qual == 0) app.Dispatcher.BeginInvoke(new Action(controle.Mostrar));
+                        else if (qual == 2) app.Dispatcher.BeginInvoke(new Action(controle.AtualizarAgora));
                         else { app.Dispatcher.BeginInvoke(new Action(controle.Sair)); return; }
                     }
                 });

@@ -1,5 +1,15 @@
 # Novidades
 
+## v1.3.0
+
+- **Avisa quando sai versão nova:** a cada 12 horas o widget olha a página de Releases. Quando tem versão nova, aparece um aviso: um clique e ele baixa, troca e reabre sozinho. Também dá para usar `ClaudeWidget.exe --atualizar`, ou desligar o aviso no ícone.
+- **Gráfico dos últimos 7 dias** no balão: quanto do limite semanal você gastou em cada dia. O histórico fica só no seu PC.
+- **Mais dados no balão:** os limites semanais por modelo e os créditos extras, quando a sua conta tiver.
+- **Tema claro e escuro:** o balão e o menu (agora no estilo do Windows 11) seguem o tema do Windows.
+- **Transportes novos para o visitante:** patinete, disco voador e tapete mágico.
+- **Chapéus novos:** abóbora e chapéu de palha. E o **chapéu da estação**, automático: Natal em dezembro, abóbora no Halloween, palha na festa junina e festa no Ano-Novo.
+- **O mascote reage ao uso:** perto de 90% ele fica cansado, suando e ofegante. Quando o limite renova, comemora com pulos e confete.
+
 ## v1.2.1
 
 - **Atualizar ficou automático:** abriu o `.exe` novo, ele fecha a versão antiga sozinho e assume o lugar. Antes, se a versão velha estivesse aberta, o `.exe` novo só chamava a velha e as opções novas não apareciam.
