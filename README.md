@@ -4,15 +4,16 @@ O mascote do **Claude Code** morando na sua barra de tarefas do Windows, com um 
 
 ![O widget na barra de tarefas: o mascote anda, outro mascote chega trazendo o balão com o uso e ele troca de chapéu](assets/demo.gif)
 
-Sem instalar nada além do que já vem no Windows: é um script de PowerShell com WPF.
+**[⬇️ Baixar o ClaudeWidget.exe](https://github.com/dev-lucccaslp/claude-widget/releases/latest)**: um arquivo só, de menos de 100 KB, sem instalar nada.
 
 ## O que ele faz
 
-- **Mostra o uso do plano** num anel ao lado do mascote: o maior entre o limite da sessão (5 horas) e o semanal. O anel fica laranja, amarelo a partir de 75% e vermelho a partir de 90%.
+- **Mostra o uso do plano** num anel ao lado do mascote. Você escolhe o que o anel mostra: o maior dos dois limites, só a sessão de 5 horas ou só o semanal. O anel fica laranja, amarelo a partir de 75% e vermelho a partir de 90%.
 - **Passando o mouse**, um segundo mascote chega andando e traz um balão com a sessão e a semana, cada uma com a hora em que renova.
 - **Se mexe o tempo todo:** anda, respira, olha em volta, pula, dança e pisca. Dá para desligar.
 - **Clique no anel** para atualizar na hora. Sozinho, ele atualiza a cada 5 minutos.
-- **Clique no mascote** (ou botão direito) para personalizar: cor, chapéu, óculos escuros, posição, movimento e o visitante.
+- **Clique no mascote** (ou botão direito) para personalizar: o que mostrar, cor, chapéu, óculos escuros, posição, movimento e o visitante.
+- **Fica nos ícones ocultos** da bandeja: dali você esconde ou mostra o widget, atualiza, liga o "Iniciar com o Windows" e sai.
 - **Funciona com vários monitores:** uma cópia em cada barra de tarefas. Some no monitor que estiver em tela cheia (vídeo, apresentação, jogo) e quando a barra se esconde.
 
 ![Chapéus e cores](assets/personalizar.png)
@@ -34,26 +35,24 @@ Barra centralizada, alinhada à esquerda, com o botão de Widgets, com muitos ap
 
 Precisa de:
 
-- Windows 10 ou 11.
+- Windows 10 ou 11 (o .NET Framework que ele usa já vem no Windows).
 - O [Claude Code](https://claude.com/claude-code) instalado e logado com sua conta do Claude (Pro, Max, Team ou Enterprise). O widget usa esse login para ler o uso do plano. Quem usa só chave de API não tem limite de plano para mostrar.
 
-Baixe o projeto (botão **Code > Download ZIP**, ou `git clone`) e rode, na pasta dele:
+**Jeito rápido:** baixe o `ClaudeWidget.exe` na [página de Releases](https://github.com/dev-lucccaslp/claude-widget/releases/latest) e abra. Para ele abrir junto com o Windows, use **Iniciar com o Windows** no ícone dele nos ícones ocultos.
+
+> Na primeira vez, o Windows pode mostrar "O Windows protegeu o computador", porque o .exe não é assinado. Clique em **Mais informações > Executar assim mesmo**. O .exe é compilado pelo próprio GitHub a partir deste código ([veja o workflow](.github/workflows/release.yml)).
+
+**Com atalhos na Área de Trabalho e no menu Iniciar:** baixe o `ClaudeWidget.zip` da mesma página, extraia e rode:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\instalar.ps1
 ```
 
-Ele copia o widget para `%LOCALAPPDATA%\ClaudeWidget`, cria os atalhos **Claude Widget** na Área de Trabalho e no menu Iniciar e já abre o widget. Não precisa de administrador.
+Ele põe o widget em `%LOCALAPPDATA%\ClaudeWidget`, cria os atalhos e já abre. Com `-ComWindows`, também liga o "Iniciar com o Windows". Não precisa de administrador, e rodar de novo atualiza mantendo suas escolhas.
 
-Para abrir junto com o Windows:
+> Em computador de empresa, o antivírus pode bloquear programas que abrem sozinhos com o Windows. Nesse caso, abra pelo atalho ou peça à TI para liberar.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\instalar.ps1 -ComWindows
-```
-
-> Em computador de empresa, o antivírus pode bloquear programas que abrem sozinhos com o Windows. Nesse caso, use o atalho da Área de Trabalho ou peça à TI para liberar.
-
-Para atualizar, baixe a versão nova e rode o `instalar.ps1` de novo: suas escolhas (cor, chapéu, posição) continuam.
+**Compilar você mesmo:** clone o repositório e rode `.\build.ps1`. Ele usa o compilador C# que já vem no Windows e gera `dist\ClaudeWidget.exe`.
 
 ## Como usar
 
@@ -61,26 +60,19 @@ Para atualizar, baixe a versão nova e rode o `instalar.ps1` de novo: suas escol
 | --- | --- |
 | Passar o mouse | O visitante chega com o balão de uso |
 | Clicar no anel | Atualiza o número na hora |
-| Clicar no mascote ou botão direito | Abre o menu: cor, chapéu, óculos, posição, movimento, visitante, fechar |
+| Clicar no mascote ou botão direito | Abre o menu: mostrar %, cor, chapéu, óculos, posição, movimento, visitante, esconder, sair |
 | Segurar e arrastar | Muda o widget de lugar na barra |
+| Ícone nos ícones ocultos | Clique para esconder ou mostrar; botão direito para atualizar, mostrar %, iniciar com o Windows e sair |
+| Abrir o .exe de novo | Se ele estiver escondido, aparece de novo |
 
-Opções para quem quiser rodar o script direto:
-
-```powershell
-powershell -NoProfile -STA -WindowStyle Hidden -File claude-widget.ps1 -IntervaloMinutos 5 -Mostrar maior
-```
-
-- `-IntervaloMinutos`: de quanto em quanto tempo busca o uso (padrão 5).
-- `-Mostrar maior|sessao|semanal`: qual limite o anel mostra (padrão: o maior dos dois).
-- `-Margem`: distância das bordas, em pixels (padrão 12).
-- `-Previa <pasta>`: gera as imagens deste README sem abrir o widget.
+As escolhas ficam em `%LOCALAPPDATA%\ClaudeWidget\config.json`. Se algo der errado, o erro fica anotado em `erros.log`, na mesma pasta, e o widget continua aberto.
 
 ## Privacidade e como funciona
 
 - O widget lê o token de login que o Claude Code guarda em `%USERPROFILE%\.claude\.credentials.json` e consulta o uso em `api.anthropic.com/api/oauth/usage`, o mesmo endereço que o Claude Code usa para mostrar o uso. Não fala com nenhum outro servidor.
 - Ele **não renova nem grava** o login. Se o token vencer, aparece um `?`. Basta abrir o Claude Code, que renova o login, e o widget volta sozinho.
 - O Windows não deixa programas entrarem de verdade na barra de tarefas. Por isso, o widget é uma janelinha transparente "sempre visível" colada em cima dela.
-- O desenho é feito pela CPU de propósito: são janelas minúsculas, e pela placa de vídeo o driver reservava centenas de MB à toa. Fica em torno de 120 MB de memória e 1 a 2% de um núcleo.
+- É um app C# com WPF, compilado para o .NET Framework 4.8. Usa em torno de 60 MB de memória e menos de 1% de CPU.
 
 ## Limitações
 
@@ -89,11 +81,13 @@ powershell -NoProfile -STA -WindowStyle Hidden -File claude-widget.ps1 -Interval
 
 ## Desinstalar
 
+Saia pelo ícone nos ícones ocultos e apague o `.exe`. Se usou o instalador, rode:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\desinstalar.ps1
 ```
 
-Fecha o widget, apaga os atalhos e a pasta `%LOCALAPPDATA%\ClaudeWidget`.
+Ele fecha o widget, tira do "Iniciar com o Windows" e apaga os atalhos e a pasta `%LOCALAPPDATA%\ClaudeWidget`.
 
 ## Aviso
 

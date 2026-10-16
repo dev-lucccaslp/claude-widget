@@ -1,0 +1,35 @@
+# Ao subir uma tag v* (ex.: v1.1.0), compila o ClaudeWidget.exe no Windows e publica na página de Releases.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Montar o zip com o instalador
+        shell: powershell
+        run: Compress-Archive -Path dist\ClaudeWidget.exe, instalar.ps1, desinstalar.ps1, README.md, LICENSE -DestinationPath ClaudeWidget.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ClaudeWidget.exe
+            ClaudeWidget.zip
+          body: |
+            **Baixe o `ClaudeWidget.exe` e abra.** Não precisa instalar nada: ele usa o .NET Framework que já vem no Windows 10 e 11.
+
+            - Precisa do Claude Code instalado e logado com sua conta do Claude (Pro, Max, Team ou Enterprise).
+            - Na primeira vez, o Windows pode mostrar "O Windows protegeu o computador", porque o .exe não é assinado. Clique em **Mais informações > Executar assim mesmo**.
+            - Quer atalhos na Área de Trabalho e no menu Iniciar? Baixe o `ClaudeWidget.zip`, extraia e rode `instalar.ps1`.

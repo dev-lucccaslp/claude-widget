@@ -1,2 +1,5 @@
 # Escolhas locais do menu (cor, chapéu, posição)
 config.json
+
+# Saída do build.ps1 (o .exe é publicado na página de Releases)
+dist/
