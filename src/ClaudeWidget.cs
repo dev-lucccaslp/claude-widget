@@ -43,8 +43,8 @@ using Shapes = System.Windows.Shapes;
 [assembly: AssemblyProduct("Claude Widget")]
 [assembly: AssemblyDescription("O mascote do Claude Code na barra de tarefas, com o uso do plano")]
 [assembly: AssemblyCopyright("MIT - github.com/dev-lucccaslp/claude-widget")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
 
 namespace ClaudeWidget
 {
@@ -142,6 +142,7 @@ namespace ClaudeWidget
         public bool LembreteVista { get; set; }
         public bool LembreteHorarios { get; set; }  // almoço, café, fim do dia, sextou
         public int IntervaloLembretes { get; set; }  // minutos
+        public bool Codando { get; set; }  // mascote no notebook enquanto o Claude Code trabalha
         public Dictionary<string, Posicao> Posicoes { get; set; }
 
         public Config()
@@ -149,6 +150,7 @@ namespace ClaudeWidget
             Cor = Arte.Laranja; Chapeu = "nenhum"; Movimento = true; Visitante = true; Mostrar = "maior"; Transporte = "pe";
             ChapeuEstacao = true; AvisarVersaoNova = true;
             Saudacao = true; LembreteAgua = true; LembreteAlongar = true; LembreteVista = true; LembreteHorarios = true; IntervaloLembretes = 60;
+            Codando = true;
             Posicoes = new Dictionary<string, Posicao>();
         }
 
@@ -628,6 +630,15 @@ namespace ClaudeWidget
             return Transportes.FirstOrDefault(t => t.Id == id) ?? Transportes[0];
         }
 
+        // O notebook do mascote quando o Claude Code está trabalhando: a tampa (com o logo laranja) na frente do corpo,
+        // o teclado embaixo e as teclas piscando (A/B) enquanto ele digita
+        public static readonly Transporte Notebook = new Transporte { Id = "notebook", Pecas = new[] {
+            P("#9CA3AF", "M6,9 H26 V19 H6 Z"),
+            P("#6B7280", "M6,18 H26 V19 H6 Z M3,19 H29 V21 H3 Z"),
+            P("#D77757", "M15,11 h2 v6 h-2 Z M13,13 h6 v2 h-6 Z"),
+            P("#E5E7EB", "M7,19 h2 v1 h-2 Z M15,19 h2 v1 h-2 Z M23,19 h2 v1 h-2 Z", "frente", "A"),
+            P("#E5E7EB", "M11,19 h2 v1 h-2 Z M19,19 h2 v1 h-2 Z", "frente", "B") } };
+
         public static readonly Dictionary<string, Geometry> Pernas = new Dictionary<string, Geometry>
         {
             { "N", FazerPernas(4, 4, 4, 4) },   // paradas
@@ -674,6 +685,8 @@ namespace ClaudeWidget
             for (int i = 0; i < 3; i++) festa.Q(y: -1).Q(y: -4, pe: "T", fechado: true, n: 2).Q(y: -1).Q();
             festa.AddRange(dancar);
             s["festa"] = festa;
+            // no notebook: balança de leve enquanto digita
+            s["digitar"] = new Roteiro().Q(n: 2).Q(y: -1).Q(n: 3).Q(y: -1).Q(n: 2).Q(fechado: true).Q(n: 2);
             return s;
         }
 
@@ -797,8 +810,18 @@ namespace ClaudeWidget
     <Path x:Name='§Oculos' Fill='#0F0F0F' Visibility='Collapsed' Data='M6,3 h6 v5 h-6 Z M20,3 h6 v5 h-6 Z M12,4 h8 v2 h-8 Z'/>
     <Path x:Name='§Suor' Fill='#7DD3FC' Visibility='Collapsed' Data='M30,-1 h2 v1 h-2 Z M29,0 h4 v3 h-4 Z M30,3 h2 v1 h-2 Z'/>
     <Canvas x:Name='§Chapeu'/>
+    <Canvas x:Name='§Xicara' Canvas.Left='31' Canvas.Top='6' Visibility='Collapsed'>
+      <Path Fill='#F5F5F5' Data='M0,2 h5 v5 h-5 Z M5,3 h1 v3 h-1 Z'/>
+      <Path Fill='#6B3F1F' Data='M0,2 h5 v1 h-5 Z'/>
+      <Path x:Name='§VaporMao' Fill='#D1D5DB' Data='M1,-1 h1 v2 h-1 Z M3,-2 h1 v2 h-1 Z'/>
+    </Canvas>
   </Canvas>
   <Canvas x:Name='§Frente'/>
+  <Canvas x:Name='§XicaraMesa' Canvas.Left='31' Canvas.Top='13' Visibility='Collapsed'>
+    <Path Fill='#F5F5F5' Data='M0,2 h5 v5 h-5 Z M5,3 h1 v3 h-1 Z'/>
+    <Path Fill='#6B3F1F' Data='M0,2 h5 v1 h-5 Z'/>
+    <Path x:Name='§VaporMesa' Fill='#D1D5DB' Data='M1,-1 h1 v2 h-1 Z M3,-2 h1 v2 h-1 Z'/>
+  </Canvas>
 </Canvas>").Replace("§", p);
         }
 
@@ -838,7 +861,7 @@ namespace ClaudeWidget
 <Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
         WindowStyle='None' AllowsTransparency='True' Background='Transparent' Topmost='True' ShowInTaskbar='False'
         ShowActivated='False' Focusable='False' IsHitTestVisible='False' ResizeMode='NoResize' SizeToContent='WidthAndHeight'
-        UseLayoutRounding='True' FontFamily='Segoe UI Variable Text, Segoe UI'>
+        UseLayoutRounding='True' FontFamily='Segoe UI Variable Text, Segoe UI, Segoe UI Emoji'>
   <Grid Margin='8'>
     <Grid.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Opacity='0.4' Color='Black'/></Grid.Effect>
     <StackPanel>
@@ -897,12 +920,14 @@ namespace ClaudeWidget
     // Um mascote (o principal ou o visitante): aplica quadros de animação e o estilo escolhido
     class Boneco
     {
-        public Canvas Raiz, Chapeu, Atras, Frente;
+        public Canvas Raiz, Chapeu, Atras, Frente, Xicara, XicaraMesa;
+        public Shapes.Path VaporMao, VaporMesa;
         public TranslateTransform Pulo, Assento;
         public ScaleTransform Espelho;
         public Shapes.Path Corpo, Pernas, Oculos, Suor;
         public Shapes.Rectangle OlhoE, OlhoD;
-        bool cansado;  // perto do limite: olhos meio fechados e uma gota de suor
+        bool cansado;      // perto do limite: olhos meio fechados e uma gota de suor
+        bool concentrado;  // no notebook: olhos baixos, olhando o teclado
         string ultimo = "", transporte = "";
         readonly List<KeyValuePair<Shapes.Path, string>> pecas = new List<KeyValuePair<Shapes.Path, string>>();
 
@@ -922,17 +947,32 @@ namespace ClaudeWidget
             OlhoE = (Shapes.Rectangle)escopo.FindName(p + "OlhoE");
             OlhoD = (Shapes.Rectangle)escopo.FindName(p + "OlhoD");
             Chapeu = (Canvas)escopo.FindName(p + "Chapeu");
+            Xicara = (Canvas)escopo.FindName(p + "Xicara");
+            XicaraMesa = (Canvas)escopo.FindName(p + "XicaraMesa");
+            VaporMao = (Shapes.Path)escopo.FindName(p + "VaporMao");
+            VaporMesa = (Shapes.Path)escopo.FindName(p + "VaporMesa");
         }
+
+        // Café: a xícara na mão (voltando da copa) e na mesa, ao lado do notebook, soltando vapor
+        public void XicaraNaMao(bool ver, bool vapor)
+        {
+            Xicara.Visibility = ver ? Visibility.Visible : Visibility.Collapsed;
+            VaporMao.Visibility = vapor ? Visibility.Visible : Visibility.Hidden;
+        }
+
+        public void XicaraNaMesa(bool ver) { XicaraMesa.Visibility = ver ? Visibility.Visible : Visibility.Collapsed; }
+        public void Vapor(bool ver) { VaporMesa.Visibility = ver ? Visibility.Visible : Visibility.Hidden; }
 
         public void Aplicar(Quadro q)
         {
-            var chave = q.Chave() + "|" + cansado;
+            var chave = q.Chave() + "|" + cansado + "|" + concentrado;
             if (chave == ultimo) return;
             ultimo = chave;
             Pulo.X = q.X;
             Pulo.Y = q.Y;
             Pernas.Data = Arte.Pernas[q.Pe];
-            double altura = q.Fechado ? 1 : cansado ? 2 : 4, topo = q.Fechado || cansado ? 6 : 4;
+            bool olhosBaixos = cansado || concentrado;
+            double altura = q.Fechado ? 1 : olhosBaixos ? 2 : 4, topo = q.Fechado || olhosBaixos ? 6 : 4;
             Canvas.SetLeft(OlhoE, 8 + q.Olhar); Canvas.SetTop(OlhoE, topo); OlhoE.Height = altura;
             Canvas.SetLeft(OlhoD, 22 + q.Olhar); Canvas.SetTop(OlhoD, topo); OlhoD.Height = altura;
         }
@@ -983,6 +1023,12 @@ namespace ClaudeWidget
 
         // Vira para a direita (indo embora) ou volta para a esquerda
         public void Virar(bool paraDireita) { Espelho.ScaleX = paraDireita ? -1 : 1; }
+
+        public bool Concentrado
+        {
+            get { return concentrado; }
+            set { if (concentrado == value) return; concentrado = value; ultimo = ""; }
+        }
 
         public bool Cansado
         {
@@ -1036,11 +1082,14 @@ namespace ClaudeWidget
         public bool Movendo;
     }
 
+    // Partícula: um papel de confete (Forma) ou um símbolo de código (Texto, que some em Vida tiques)
     class Confete
     {
         public Shapes.Rectangle Forma;
+        public TextBlock Texto;
         public Canvas Onde;
         public double X, Y, VX, VY;
+        public int Vida;
     }
 
     class Controle
@@ -1083,6 +1132,22 @@ namespace ClaudeWidget
 
         readonly List<Confete> confetes = new List<Confete>();
         DispatcherTimer queda;
+
+        // Claude Code trabalhando: o mascote vai para o notebook e solta símbolos de código
+        FileSystemWatcher vigiaClaude;
+        long ultimaAtividade;  // DateTime.UtcNow.Ticks da última conversa gravada pelo Claude Code
+        bool codando;
+        int tique;
+        DateTime codandoDemoAte = DateTime.MinValue;
+        // pausa para o café: null, "saindo", "fora" ou "voltando"; cafeX é o quanto ele andou (o notebook fica parado)
+        string cafe;
+        double cafeX;
+        int cafeTiques;
+        DateTime proximoCafe = DateTime.MaxValue;
+        readonly List<Confete> codigos = new List<Confete>();
+        static readonly string[] Simbolos = { "</>", "{ }", "( )", "01", "=>", ";", "fn", "[ ]" };
+        static readonly string[] CoresDoCodigo = { "#D77757", "#60A5FA", "#4ADE80", "#C084FC", "#FACC15" };
+        static readonly FontFamily FonteDeCodigo = new FontFamily("Consolas");
 
         // fala do mascote: saudação e lembretes
         Window fala;
@@ -1131,6 +1196,7 @@ namespace ClaudeWidget
             relogio = NovoTimer(IntervaloMinutos * 60000, delegate { AtualizarUso(); ConferirChapeuDaEstacao(); });
             queda = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
             queda.Tick += delegate { CairConfete(); };
+            VigiarClaudeCode();
 
             // Versão nova no GitHub: olha um minuto depois de abrir e depois a cada 12 horas.
             // Também apaga o .exe antigo que ficou da última atualização.
@@ -1163,10 +1229,12 @@ namespace ClaudeWidget
                 Depois(800, delegate { Saudar(true); });
                 Depois(1500, Comemorar);
                 Depois(4000, MostrarLembreteAgora);
+                Depois(5500, delegate { codandoDemoAte = DateTime.Now.AddSeconds(22); });
+                Depois(6500, IniciarCafe);
                 // Passa por todos os transportes, um depois do outro, no primeiro widget (o balão é um só)
                 int proximo = 0;
                 DateTime parouEm = DateTime.MinValue;
-                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
+                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(16) };
                 t.Tick += delegate
                 {
                     t.Interval = TimeSpan.FromMilliseconds(300);
@@ -1404,6 +1472,7 @@ namespace ClaudeWidget
             if (bandeja != null)
             {
                 var dica = uso.Erro != null ? "Claude Widget · " + uso.Erro : "Claude · 5h " + uso.Sessao + "% · semana " + uso.Semana + "%";
+                if (codando) dica = "Claude trabalhando · " + dica.Replace("Claude · ", "");
                 bandeja.Text = dica.Length > 63 ? dica.Substring(0, 63) : dica;
             }
             if (donoBalao != null) MostrarBalao(donoBalao);
@@ -1495,7 +1564,7 @@ namespace ClaudeWidget
             barraSemana.Background = Arte.Pincel(Arte.CorDoUso(uso.Semana));
             renovaSessao.Text = uso.RenovaSessao;
             renovaSemana.Text = uso.RenovaSemana;
-            rodape.Text = uso.Hora;
+            rodape.Text = uso.Hora + (codando ? "\nClaude Code trabalhando agora 💻" : "");
             PreencherExtras();
             DesenharGrafico();
             textoNovaVersao.Text = novaVersao == null ? "" : "Versão " + novaVersao + " disponível: atualize pelo ícone nos ícones ocultos";
@@ -1943,8 +2012,172 @@ namespace ClaudeWidget
             if (confetes.Count > 0) { CairConfete(); queda.Start(); }
         }
 
+        // --- Claude Code trabalhando ---
+        // O Claude Code grava cada conversa em ~/.claude/projects/<projeto>/<sessão>.jsonl. Só olha QUANDO um desses
+        // arquivos muda (não lê o conteúdo): mudou nos últimos 20 segundos, ele está trabalhando.
+        void VigiarClaudeCode()
+        {
+            try
+            {
+                var pasta = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+                if (!Directory.Exists(pasta)) return;
+                vigiaClaude = new FileSystemWatcher(pasta, "*.jsonl")
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+                };
+                FileSystemEventHandler marcar = delegate { Interlocked.Exchange(ref ultimaAtividade, DateTime.UtcNow.Ticks); };
+                vigiaClaude.Changed += marcar;
+                vigiaClaude.Created += marcar;
+                vigiaClaude.EnableRaisingEvents = true;
+            }
+            catch { }
+        }
+
+        bool ClaudeTrabalhando()
+        {
+            return DateTime.UtcNow.Ticks - Interlocked.Read(ref ultimaAtividade) < TimeSpan.FromSeconds(20).Ticks
+                || DateTime.Now < codandoDemoAte;
+        }
+
+        // Liga ou desliga o notebook quando o Claude Code começa ou para de trabalhar
+        void AtualizarCodando()
+        {
+            bool agora = config.Codando && ClaudeTrabalhando();
+            if (agora == codando) return;
+            codando = agora;
+            fila.Clear();
+            // o primeiro café sai depois de uns 15 a 25 minutos trabalhando
+            if (codando) proximoCafe = DateTime.Now.AddMinutes(15 + sorteio.Next(11));
+            else AbortarCafe();
+            foreach (var w in widgets.Values) MontarNotebook(w);
+            MostrarUso();
+        }
+
+        void MontarNotebook(Widget w)
+        {
+            w.Principal.Montar(codando ? Arte.Notebook : Arte.Transportes[0]);
+            w.Principal.Fase(false, false);
+            w.Principal.Concentrado = codando;
+            if (!codando) w.Principal.XicaraNaMesa(false);
+        }
+
+        // --- Pausa para o café: avisa, levanta, sai andando, volta com a xícara e deixa na mesa ---
+        void IniciarCafe()
+        {
+            if (cafe != null) return;
+            if (!codando || Ordem.Pausado || widgets.Values.Any(w => w.Visita != "fora"))
+            {
+                proximoCafe = DateTime.Now.AddMinutes(2);  // agora não dá: tenta daqui a pouco
+                return;
+            }
+            cafe = "saindo";
+            cafeX = 0;
+            cafeTiques = 0;
+            foreach (var w in widgets.Values)
+            {
+                w.Principal.Fase(false, false);
+                w.Principal.Concentrado = false;
+                w.Principal.XicaraNaMesa(false);
+            }
+            Falar("Vou buscar um café ☕ Já volto!");
+            proximoCafe = DateTime.Now.AddMinutes(15 + sorteio.Next(11));
+        }
+
+        void PassoDoCafe()
+        {
+            cafeTiques++;
+            bool par = cafeTiques % 2 == 0;
+            var q = new Quadro { Pe = par ? "A" : "B", Y = par ? -1 : 0 };
+            if (cafe == "saindo")
+            {
+                cafeX -= 3;
+                q.Olhar = -2;
+                if (cafeX <= -46) { cafe = "fora"; cafeTiques = 0; }
+            }
+            else if (cafe == "fora")
+            {
+                q = new Quadro();
+                if (cafeTiques >= 34) { cafe = "voltando"; cafeTiques = 0; }  // uns 4 segundos na copa
+            }
+            else
+            {
+                cafeX += 3;
+                q.Olhar = 2;
+                if (cafeX >= 0) { cafeX = 0; cafe = null; q = new Quadro(); }
+            }
+            foreach (var w in widgets.Values)
+            {
+                w.Principal.Assento.X = cafeX;
+                w.Principal.Aplicar(q);
+                w.Principal.XicaraNaMao(cafe == "voltando", par);
+            }
+            if (cafe == null) Voltou();
+        }
+
+        void Voltou()
+        {
+            foreach (var w in widgets.Values)
+            {
+                w.Principal.XicaraNaMao(false, false);
+                w.Principal.XicaraNaMesa(true);
+                w.Principal.Concentrado = codando;
+            }
+            Falar("Voltei! Café na mão, bora codar ☕");
+        }
+
+        void AbortarCafe()
+        {
+            cafe = null;
+            cafeX = 0;
+            foreach (var w in widgets.Values)
+            {
+                w.Principal.Assento.X = 0;
+                w.Principal.XicaraNaMao(false, false);
+            }
+        }
+
+        // Um símbolo de código sai do notebook, sobe e some
+        void SoltarCodigo()
+        {
+            foreach (var w in widgets.Values)
+            {
+                if (!w.Janela.IsVisible) continue;
+                var texto = new TextBlock
+                {
+                    Text = Simbolos[sorteio.Next(Simbolos.Length)],
+                    FontSize = 7.5,
+                    FontFamily = FonteDeCodigo,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Arte.Pincel(CoresDoCodigo[sorteio.Next(CoresDoCodigo.Length)]),
+                };
+                // sai pelos lados do notebook, para não passar na frente do rosto
+                bool esquerda = sorteio.Next(2) == 0;
+                var c = new Confete
+                {
+                    Texto = texto, Onde = w.Festa, Vida = 36, VY = -0.5,
+                    X = esquerda ? -2 + sorteio.NextDouble() * 6 : 34 + sorteio.NextDouble() * 6,
+                    Y = 24 + sorteio.NextDouble() * 4,
+                    VX = esquerda ? -0.25 : 0.25,
+                };
+                w.Festa.Children.Add(texto);
+                codigos.Add(c);
+            }
+            if (codigos.Count > 0 && !queda.IsEnabled) queda.Start();
+        }
+
         void CairConfete()
         {
+            for (int i = codigos.Count - 1; i >= 0; i--)
+            {
+                var c = codigos[i];
+                c.X += c.VX;
+                c.Y += c.VY;
+                if (--c.Vida <= 0) { c.Onde.Children.Remove(c.Texto); codigos.RemoveAt(i); continue; }
+                c.Texto.Opacity = Math.Min(1, c.Vida / 18.0);
+                Canvas.SetLeft(c.Texto, c.X);
+                Canvas.SetTop(c.Texto, c.Y);
+            }
             for (int i = confetes.Count - 1; i >= 0; i--)
             {
                 var c = confetes[i];
@@ -1956,7 +2189,7 @@ namespace ClaudeWidget
                 Canvas.SetLeft(c.Forma, c.X);
                 Canvas.SetTop(c.Forma, c.Y);
             }
-            if (confetes.Count == 0) queda.Stop();
+            if (confetes.Count == 0 && codigos.Count == 0) queda.Stop();
         }
 
         void CriarMenu(Widget w)
@@ -2005,6 +2238,7 @@ namespace ClaudeWidget
             Opcao(posicao, "Onde eu arrastar (segure e arraste o widget)", null, () => config.PosicaoDe(w.Monitor).Modo == "manual", w, true);
             menu.Items.Add(new Separator());
             Opcao(menu, "Movimento", delegate { config.Movimento = !config.Movimento; MudouEstilo(); }, () => config.Movimento, w);
+            Opcao(menu, "Claude codando (quando o Claude Code estiver trabalhando)", delegate { config.Codando = !config.Codando; config.Salvar(); }, () => config.Codando, w);
             Opcao(menu, "Visitante ao passar o mouse", delegate { config.Visitante = !config.Visitante; MudouEstilo(); }, () => config.Visitante, w);
             var chegada = Opcao(menu, "Visitante chega de");
             foreach (var transporte in Arte.Transportes)
@@ -2144,6 +2378,7 @@ namespace ClaudeWidget
             Ordem.Widgets.Add(w.Hwnd);
             MostrarEstado(w);
             EstiloDe(w);
+            if (codando) MontarNotebook(w);
             return w;
         }
 
@@ -2368,17 +2603,25 @@ namespace ClaudeWidget
         {
             // Respeita a opção do menu e "Efeitos de animação" desligado no Windows
             bool mexer = config.Movimento && SystemParameters.ClientAreaAnimation;
-            if (mexer)
+            AtualizarCodando();
+            tique++;
+            if (mexer && cafe != null) PassoDoCafe();
+            else if (mexer)
             {
-                if (fila.Count == 0) Animar(Sortear());
+                // no notebook ele só digita; fora dele, sorteia o próximo movimento
+                if (fila.Count == 0) Animar(codando ? "digitar" : Sortear());
                 var q = fila.Dequeue();
                 foreach (var w in widgets.Values)
                 {
                     var quadro = q;
-                    // com visita, o mascote olha para o visitante
-                    if (w.Visita != "fora") { quadro = q.Copia(); quadro.Olhar = 2; }
+                    // com visita, o mascote olha para o visitante (no notebook, continua olhando o teclado)
+                    if (w.Visita != "fora" && !codando) { quadro = q.Copia(); quadro.Olhar = 2; }
                     w.Principal.Aplicar(quadro);
+                    if (codando) w.Principal.Fase(true, tique % 2 == 0);
+                    w.Principal.Vapor(tique % 8 < 4);
                 }
+                if (codando && tique % 6 == 0) SoltarCodigo();
+                if (codando && DateTime.Now >= proximoCafe) IniciarCafe();
             }
             foreach (var w in widgets.Values) PassoDaVisita(w, mexer);
         }

@@ -1,5 +1,11 @@
 # Novidades
 
+## v1.5.0
+
+- **Claude codando 💻:** quando o Claude Code está trabalhando, o mascote senta no notebook e digita, com símbolos de código saindo do teclado. O balão de uso e o ícone mostram "Claude Code trabalhando agora". Ele só repara quando os arquivos de conversa do Claude Code mudam, sem ler o que tem dentro. Dá para desligar em **Claude codando** no menu.
+- **Pausa para o café ☕:** depois de 15 a 25 minutos de trabalho, ele avisa "Vou buscar um café ☕ Já volto!", levanta, sai andando e volta com a xícara fumegando, que fica ao lado do notebook.
+- **Versão para Mac 🍎 (beta):** o mascote na barra de menus do macOS, com o anel de uso, o painel com o gráfico da semana, cores, chapéus, óculos, saudação, lembretes, Claude codando e a pausa para o café. Baixe o `ClaudeWidget-mac.zip`.
+
 ## v1.4.0
 
 - **Bom dia, boa tarde, boa noite:** quando você liga o PC, o mascote dá oi com o seu nome e um resumo do uso. Se você desbloquear o PC em outro período do dia (saiu de manhã, voltou de tarde), ele cumprimenta de novo.

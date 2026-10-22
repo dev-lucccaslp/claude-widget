@@ -1,5 +1,5 @@
-# Ao subir uma tag v* (ex.: v1.2.1), compila o ClaudeWidget.exe no Windows e publica na página de Releases,
-# com as novidades daquela versão tiradas do NOVIDADES.md.
+# Ao subir uma tag v* (ex.: v1.5.0), compila o ClaudeWidget.exe no Windows e o Claude Widget.app no macOS
+# e publica os dois na página de Releases, com as novidades daquela versão tiradas do NOVIDADES.md.
 name: Release
 
 on:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,21 +21,63 @@ jobs:
 
       - name: Montar o zip com o instalador
         shell: powershell
-        run: Compress-Archive -Path dist\ClaudeWidget.exe, instalar.ps1, desinstalar.ps1, README.md, LICENSE -DestinationPath ClaudeWidget.zip
+        run: Compress-Archive -Path dist\ClaudeWidget.exe, instalar.ps1, desinstalar.ps1, README.md, LICENSE -DestinationPath dist\ClaudeWidget.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/ClaudeWidget.exe
+            dist/ClaudeWidget.zip
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar (Apple Silicon e Intel)
+        run: |
+          bash mac/build.sh "$GITHUB_REF_NAME" 2>&1 | tee build.log
+          grep -E "warning:|error:" build.log | sed 's#.*/mac/#mac/#' | sort -u | head -30 | sed 's/^/::warning::/' || true
+
+      - name: Testar (abre o app em modo demo e confere que ele continua aberto)
+        run: |
+          open "dist/Claude Widget.app" --args --demo
+          sleep 10
+          pgrep -x ClaudeWidget > /dev/null || { echo "::error::O Claude Widget fechou sozinho ao abrir"; exit 1; }
+          pkill -x ClaudeWidget
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/ClaudeWidget-mac.zip
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Escrever as notas da versão
-        shell: powershell
+        shell: pwsh
         run: |
           $novidades = [IO.File]::ReadAllText('NOVIDADES.md', [Text.Encoding]::UTF8)
           $versao = [regex]::Escape($env:GITHUB_REF_NAME)
           $trecho = [regex]::Match($novidades, '(?ms)^## ' + $versao + '\s*$(.*?)(?=^## |\z)')
           $notas = if ($trecho.Success) { $trecho.Groups[1].Value.Trim() } else { '' }
-          $baixar = [IO.File]::ReadAllText('.github\como-baixar.md', [Text.Encoding]::UTF8)
+          $baixar = [IO.File]::ReadAllText('.github/como-baixar.md', [Text.Encoding]::UTF8)
           [IO.File]::WriteAllText('notas.md', "## Novidades`n`n$notas`n`n$baixar", (New-Object Text.UTF8Encoding($false)))
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/ClaudeWidget.exe
-            ClaudeWidget.zip
+            dist/ClaudeWidget.zip
+            dist/ClaudeWidget-mac.zip
           body_path: notas.md
